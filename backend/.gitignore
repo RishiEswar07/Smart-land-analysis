@@ -1,0 +1,22 @@
+# Environment
+.env
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+
+# Generated
+generated_reports/
+*.log
+
+# Alembic (keep versions, ignore local db files if any)
+*.sqlite3

@@ -1,0 +1,74 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  h1, h2, h3, h4 {
+    @apply font-display text-ink;
+  }
+  /* Visible keyboard focus everywhere — accessibility floor */
+  a:focus-visible,
+  button:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  [tabindex]:focus-visible {
+    outline: 2px solid #2563EB;
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  /* ---- Signature element: topographic contour-line pattern ----
+     Concentric wavy lines evoke elevation contours on a land survey
+     map — used behind the hero and as a quiet card texture, tying the
+     visual identity directly to "land analysis" rather than a generic
+     gradient blob. */
+  .contour-field {
+    background-image:
+      repeating-radial-gradient(circle at 78% 30%, rgba(37, 99, 235, 0.14) 0px, rgba(37, 99, 235, 0.14) 1px, transparent 1px, transparent 26px),
+      repeating-radial-gradient(circle at 78% 30%, rgba(22, 163, 74, 0.10) 0px, rgba(22, 163, 74, 0.10) 1px, transparent 1px, transparent 42px);
+    background-color: transparent;
+  }
+
+  .contour-field-dark {
+    background-image:
+      repeating-radial-gradient(circle at 82% 22%, rgba(255, 255, 255, 0.08) 0px, rgba(255, 255, 255, 0.08) 1px, transparent 1px, transparent 26px),
+      repeating-radial-gradient(circle at 82% 22%, rgba(22, 163, 74, 0.20) 0px, rgba(22, 163, 74, 0.20) 1px, transparent 1px, transparent 44px);
+  }
+
+  .pin-dot {
+    box-shadow: 0 0 0 6px rgba(220, 38, 38, 0.15);
+  }
+
+  .card-base {
+    @apply bg-white border border-line rounded-xl2 shadow-card;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-full bg-brand-gradient text-white font-display font-semibold px-7 py-3.5 shadow-soft transition-transform duration-200 hover:scale-[1.03] active:scale-[0.98];
+  }
+
+  .btn-outline {
+    @apply inline-flex items-center justify-center gap-2 rounded-full border border-line bg-white text-ink font-display font-semibold px-7 py-3.5 transition-colors duration-200 hover:border-blue hover:text-blue;
+  }
+
+  .label-eyebrow {
+    @apply inline-flex items-center gap-2 text-xs font-semibold tracking-widest uppercase text-blue-deep bg-blue-mist px-3 py-1.5 rounded-full;
+  }
+
+  .data-mono {
+    @apply font-mono text-sm tracking-tight;
+  }
+}
