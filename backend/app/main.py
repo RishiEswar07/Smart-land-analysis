@@ -94,12 +94,14 @@ def create_application() -> FastAPI:
     # Each module below is registered here as it is implemented.
     from app.routers import auth  # Auth module
     from app.routers import land  # Module 2
+    from app.routers import landcover  # ESA WorldCover Module
     from app.routers import analysis  # Module 6
     from app.routers import dashboard  # Dashboard module
     from app.routers import reports  # Reports module
 
     app.include_router(auth.router, prefix=settings.API_V1_PREFIX)
     app.include_router(land.router, prefix=settings.API_V1_PREFIX)
+    app.include_router(landcover.router, prefix=settings.API_V1_PREFIX)
     app.include_router(analysis.router, prefix=settings.API_V1_PREFIX)
     app.include_router(dashboard.router, prefix=settings.API_V1_PREFIX)
     app.include_router(reports.router, prefix=settings.API_V1_PREFIX)

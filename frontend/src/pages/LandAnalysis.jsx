@@ -12,7 +12,7 @@ import useGeolocation from '../hooks/useGeolocation'
 import landService from '../services/landService'
 import analysisService from '../services/analysisService'
 import geocodeService from '../services/geocodeService'
-import gisService from '../services/gisService'
+import gisService, { normalizeSoilType } from '../services/gisService'
 
 export default function LandAnalysis() {
   const { position: defaultCenter } = useGeolocation()
@@ -31,6 +31,7 @@ export default function LandAnalysis() {
     address: null,
     area_sqft: null,
     soil_type: null,
+    land_cover: null,
     road_width: null,
     water_availability: null,
     electricity_availability: null,
@@ -70,11 +71,12 @@ export default function LandAnalysis() {
 
     try {
       // Run concurrent GIS queries
-      const [address, parcel, infra, soil] = await Promise.all([
+      const [address, parcel, infra, soil, landCover] = await Promise.all([
         geocodeService.reverseGeocode(lat, lng).catch(() => 'Data Not Available'),
         !activeBoundary ? gisService.fetchParcelData(lat, lng) : Promise.resolve({ available: true, areaSqFt: activeBoundary.areaSqFt, geojson: activeBoundary.geojson }),
         gisService.fetchInfrastructure(lat, lng),
-        gisService.fetchSoilType(lat, lng)
+        gisService.fetchSoilType(lat, lng),
+        gisService.fetchLandCover(lat, lng).catch(() => ({ available: false }))
       ]);
 
       setGisData({
@@ -84,7 +86,8 @@ export default function LandAnalysis() {
         road_width: infra.available ? infra.roadWidth : 20,
         water_availability: infra.available ? infra.water : true,
         electricity_availability: infra.available ? infra.electricity : true,
-        soil_type: soil.available ? soil.mappedType : 'Red Soil / Loamy',
+        soil_type: soil.available ? normalizeSoilType(soil.mappedType) : 'Red Soil',
+        land_cover: landCover.available ? landCover : null,
         lat,
         lng
       });
@@ -120,7 +123,7 @@ export default function LandAnalysis() {
         address: gisData.address || "Unknown Address",
         area_sqft: finalArea,
         road_width: gisData.road_width,
-        soil_type: gisData.soil_type,
+        soil_type: normalizeSoilType(gisData.soil_type),
         land_type: "Residential", // Default generic zoning
         water_availability: gisData.water_availability,
         electricity_availability: gisData.electricity_availability,
@@ -321,6 +324,29 @@ export default function LandAnalysis() {
                   <p className="text-[10px] text-slate-400">Source: ISRIC SoilGrids REST API</p>
                 </div>
                 <span className="text-sm text-slate-600 font-medium">{gisData.soil_type || <span className="text-red-500">Data Not Available</span>}</span>
+              </div>
+
+              <div className="flex justify-between items-center py-3 border-b border-slate-100">
+                <div>
+                  <p className="text-sm font-bold text-slate-700">Land Cover (ESA WorldCover)</p>
+                  <p className="text-[10px] text-slate-400">Source: ESA WorldCover 10m (Sentinel-2 COG)</p>
+                </div>
+                {gisData.land_cover ? (
+                  <div className="text-right">
+                    <span className="text-sm text-slate-700 font-bold block">{gisData.land_cover.land_cover_name}</span>
+                    <span className={`inline-block text-[11px] font-semibold px-2 py-0.5 rounded-full mt-0.5 ${
+                      gisData.land_cover.construction_suitability === 'Suitable'
+                        ? 'bg-emerald-100 text-emerald-700'
+                        : gisData.land_cover.construction_suitability === 'Caution'
+                        ? 'bg-amber-100 text-amber-700'
+                        : 'bg-rose-100 text-rose-700'
+                    }`}>
+                      {gisData.land_cover.construction_suitability}
+                    </span>
+                  </div>
+                ) : (
+                  <span className="text-sm text-slate-500 font-medium">Standard Terrain</span>
+                )}
               </div>
 
               <div className="flex justify-between items-center py-3 border-b border-slate-100">

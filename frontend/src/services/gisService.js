@@ -5,16 +5,33 @@ import centroid from '@turf/centroid';
 const OVERPASS_API = 'https://overpass-api.de/api/interpreter';
 const SOILGRIDS_API = 'https://rest.isric.org/soilgrids/v2.0/classification/query';
 
-// Mapping WRB Soil classes to our project types
-const mapSoilType = (wrbClassName) => {
+import api from './api';
+
+// Mapping WRB Soil classes and keywords to our project types
+export const mapSoilType = (wrbClassName) => {
   const name = (wrbClassName || '').toLowerCase();
-  if (name.includes('vertisol')) return 'Black Cotton';
-  if (name.includes('arenosol') || name.includes('podzol')) return 'Sandy';
-  if (name.includes('acrisol') || name.includes('ferralsol') || name.includes('nitisol') || name.includes('lixisol')) return 'Red Soil';
-  if (name.includes('leptosol') || name.includes('regosol')) return 'Rocky';
-  if (name.includes('cambisol') || name.includes('luvisol') || name.includes('phaeozem') || name.includes('kastanozem')) return 'Loamy';
-  if (name.includes('gleysol') || name.includes('fluvisol') || name.includes('stagnosol') || name.includes('planosol')) return 'Clayey';
+  if (name.includes('vertisol') || name.includes('black cotton') || name.includes('black') || name.includes('regur')) return 'Black Cotton';
+  if (name.includes('acrisol') || name.includes('ferralsol') || name.includes('nitisol') || name.includes('lixisol') || name.includes('red soil') || name.includes('red')) return 'Red Soil';
+  if (name.includes('clayey') || name.includes('clay') || name.includes('gleysol') || name.includes('fluvisol') || name.includes('stagnosol') || name.includes('planosol')) return 'Clayey';
+  if (name.includes('arenosol') || name.includes('podzol') || name.includes('sandy') || name.includes('sand')) return 'Sandy';
+  if (name.includes('leptosol') || name.includes('regosol') || name.includes('rocky') || name.includes('rock')) return 'Rocky';
+  if (name.includes('cambisol') || name.includes('luvisol') || name.includes('phaeozem') || name.includes('kastanozem') || name.includes('loamy') || name.includes('loam') || name.includes('silt')) return 'Loamy';
   return 'Loamy'; // Default generic
+};
+
+// Clean, normalize, and extract first valid soil type from any compound string (e.g. 'Red Soil / Loamy')
+export const normalizeSoilType = (rawSoil) => {
+  if (!rawSoil || typeof rawSoil !== 'string') return 'Loamy';
+
+  // Split by slashes, commas, dashes, pluses, parentheses, and/or keywords
+  const tokens = rawSoil.split(/[\/\\|;,+&()]|\band\b|\bor\b/i).map(t => t.trim()).filter(Boolean);
+
+  for (const token of tokens) {
+    const mapped = mapSoilType(token);
+    if (mapped) return mapped;
+  }
+
+  return mapSoilType(rawSoil);
 };
 
 const gisService = {
@@ -153,6 +170,22 @@ const gisService = {
     } catch (error) {
       console.error('SoilGrids fetch error:', error);
       return { available: false };
+    }
+  },
+
+  /**
+   * Fetch real ESA WorldCover land-cover classification from backend API
+   */
+  async fetchLandCover(lat, lng) {
+    try {
+      const response = await api.get('/landcover', { params: { lat, lon: lng } });
+      return {
+        available: true,
+        ...response.data
+      };
+    } catch (error) {
+      console.warn('ESA WorldCover fetch error:', error);
+      return { available: false, error: error.message };
     }
   }
 };

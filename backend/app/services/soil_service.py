@@ -15,21 +15,21 @@ from typing import Dict, Any
 logger = logging.getLogger(__name__)
 
 SOILGRIDS_PROPERTIES_API = "https://rest.isric.org/soilgrids/v2.0/properties/query"
-DEFAULT_SOIL_TEXTURE = {"clay": 33.3, "sand": 33.3, "silt": 33.4, "soil_type": "Loam", "source": "Fallback (Default)"}
+DEFAULT_SOIL_TEXTURE = {"clay": 33.3, "sand": 33.3, "silt": 33.4, "soil_type": "Loamy", "source": "Fallback (Default)"}
 
 
 def classify_soil_type(clay: float, sand: float, silt: float) -> str:
-    """Classifies soil texture into major categories based on USDA texture triangle heuristics."""
+    """Classifies soil texture into major categories matching SoilType enum."""
     if sand >= 65.0:
         return "Sandy"
     elif clay >= 40.0:
-        return "Clay"
+        return "Clayey"
     elif silt >= 40.0:
-        return "Silt"
+        return "Loamy"
     elif clay >= 25.0:
-        return "Black Cotton" # High clay-swelling expansion profile
+        return "Black Cotton"  # High clay-swelling expansion profile
     else:
-        return "Loam"
+        return "Loamy"
 
 
 async def fetch_soilgrids_data(lat: float, lng: float, timeout_seconds: float = 6.0) -> Dict[str, Any]:

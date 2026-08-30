@@ -22,6 +22,7 @@ from app.models.analysis import Analysis
 from app.models.land import Land, LandType, SoilType
 from app.services.exceptions import NotFoundError
 from app.services.soil_service import fetch_soilgrids_data
+from app.services.landcover_service import get_land_cover, LandCoverLookupError
 
 logger = logging.getLogger(__name__)
 
@@ -120,19 +121,24 @@ def _build_explanation(land: Land, r: dict) -> str:
     hotels = r['hotels']
     road = land.road_width or 20.0
     reg_info = r.get('reg_info')
+    lc = r.get('land_cover')
     
-    # 1. Spatial / Regional Land Cover Check
+    # 1. Satellite & Spatial Land Cover Check
     reasons = []
-    if reg_info:
+    if lc:
+        reasons.append(f"Satellite Land Cover (ESA WorldCover 2021): {lc.class_name} [{lc.construction_suitability}] — {lc.suitability_note}")
+    elif reg_info:
         cover = reg_info.get('land_cover', 'Unknown')
         hist_flood = reg_info.get('historical_floods', 0) or reg_info.get('flood_occurred', 0)
         if cover == 'Water Body':
-            reasons.append(f"CRITICAL WARNING: Spatial land cover lookup identifies this location inside or directly adjacent to a Water Body. Construction suitability is heavily penalized.")
+            reasons.append("CRITICAL WARNING: Spatial land cover lookup identifies this location inside or directly adjacent to a Water Body. Construction suitability is heavily penalized.")
         elif hist_flood == 1:
             reasons.append(f"Historical GIS records indicate past flood events in this zone (elevation: {r['elevation']:.1f}m, discharge: {r['discharge']:.1f} m³/s).")
 
     # 2. Why this building type?
-    if btype == "School" and schools == 0:
+    if btype == "Not Recommended":
+        reasons.append("Construction is NOT recommended at this site due to high-risk satellite land-cover or ecological protection status.")
+    elif btype == "School" and schools == 0:
         reasons.append(f"A {btype} is highly recommended here due to a lack of educational facilities within a 2km radius (high demand).")
     elif btype == "Hospital/Clinic" and hospitals == 0:
         reasons.append(f"A {btype} is strongly suggested because the ML model detected 0 medical facilities nearby and sufficient road width ({road}ft) for emergency access.")
@@ -145,17 +151,18 @@ def _build_explanation(land: Land, r: dict) -> str:
         
     # 3. Why NOT other types?
     rejections = []
-    if btype != "Hospital/Clinic":
-        if hospitals > 1:
-            rejections.append(f"A Hospital/Clinic is NOT recommended due to market saturation (already {hospitals} nearby).")
-        elif road < 25:
-            rejections.append("A Hospital/Clinic is rejected due to narrow traffic access (<25ft road) unsuitable for ambulances.")
-    
-    if btype != "Hotel/Resort" and hotels > 2:
-        rejections.append(f"A Hotel/Resort is rejected due to heavy local competition ({hotels} nearby).")
+    if btype != "Not Recommended":
+        if btype != "Hospital/Clinic":
+            if hospitals > 1:
+                rejections.append(f"A Hospital/Clinic is NOT recommended due to market saturation (already {hospitals} nearby).")
+            elif road < 25:
+                rejections.append("A Hospital/Clinic is rejected due to narrow traffic access (<25ft road) unsuitable for ambulances.")
         
-    if btype != "School" and schools > 3:
-        rejections.append(f"A School is not advised as the area is already heavily served ({schools} existing).")
+        if btype != "Hotel/Resort" and hotels > 2:
+            rejections.append(f"A Hotel/Resort is rejected due to heavy local competition ({hotels} nearby).")
+            
+        if btype != "School" and schools > 3:
+            rejections.append(f"A School is not advised as the area is already heavily served ({schools} existing).")
         
     parts = reasons + rejections + [
         f"Real-time API metrics show plot elevation at {r['elevation']:.1f}m and nearest river discharge at {r['discharge']:.1f} m³/s, strongly influencing the {r['flood_score']}% flood risk score."
@@ -220,6 +227,15 @@ async def compute_analysis(land: Land) -> _AnalysisResult:
     schools, hospitals, hotels = await _fetch_overpass_amenities(lat, lng)
     reg_info = _get_nearest_regional_info(lat, lng)
     soil_data = await fetch_soilgrids_data(lat, lng)
+    
+    # Real ESA WorldCover Satellite Land-Cover Lookup
+    land_cover_res = None
+    try:
+        land_cover_res = get_land_cover(lat, lng)
+    except LandCoverLookupError as exc:
+        logger.warning(f"ESA WorldCover lookup note for ({lat}, {lng}): {exc}")
+    except Exception as exc:
+        logger.warning(f"ESA WorldCover unexpected error for ({lat}, {lng}): {exc}")
 
     # 2. Build ML Input
     if land.soil_type:
@@ -269,19 +285,35 @@ async def compute_analysis(land: Land) -> _AnalysisResult:
         if hist_flood == 1:
             flood_score = round(_clip(flood_score + 20.0), 1)
             risk_score = round(_clip(risk_score + 15.0), 1)
+
+    # 5. ESA WorldCover High-Confidence Ground-Truth Overrides
+    if land_cover_res:
+        if land_cover_res.construction_suitability == "Unsuitable":
+            suitability = min(suitability, 5.0)
+            risk_score = max(risk_score, 95.0)
+            env_score = max(env_score, 95.0)
+            if land_cover_res.category in ["Water", "Wetland"]:
+                flood_score = max(flood_score, 90.0)
+        elif land_cover_res.construction_suitability == "Caution":
+            env_score = round(_clip(env_score + 15.0), 1)
+            risk_score = round(_clip(risk_score + 10.0), 1)
+            suitability = round(_clip(suitability - 10.0), 1)
     
     btype_pred = clf_btype.predict(x_input)[0]
     building_type = le_btype.inverse_transform([btype_pred])[0]
+    if land_cover_res and land_cover_res.construction_suitability == "Unsuitable":
+        building_type = "Not Recommended"
 
     risk_level = _risk_level(risk_score)
     infra_readiness = round(_clip(100.0 - infra_risk), 1)
     traffic_score = round(_clip(100.0 - access_score), 1)
 
+    env_label = f"Environmental Risk ({land_cover_res.class_name})" if land_cover_res else "Environmental Risk"
     risk_breakdown = {
         "flood_risk": {"label": f"Flood Risk (Elev: {elevation:.0f}m, Flow: {discharge:.0f}m³/s)", "score": flood_score, "weight": 0.35},
         "accessibility_risk": {"label": "Accessibility / Road Risk", "score": access_score, "weight": 0.25},
         "infrastructure_risk": {"label": "Infrastructure Risk", "score": infra_risk, "weight": 0.25},
-        "environmental_risk": {"label": "Environmental Risk", "score": env_score, "weight": 0.15},
+        "environmental_risk": {"label": env_label, "score": env_score, "weight": 0.15},
     }
 
     explanation = _build_explanation(
@@ -299,7 +331,8 @@ async def compute_analysis(land: Land) -> _AnalysisResult:
             "schools": schools,
             "hospitals": hospitals,
             "hotels": hotels,
-            "reg_info": reg_info
+            "reg_info": reg_info,
+            "land_cover": land_cover_res,
         },
     )
 

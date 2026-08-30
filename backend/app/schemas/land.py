@@ -9,6 +9,7 @@ Pydantic v2 request/response schemas for the Land Management module.
 - LandListResponse -> paginated list wrapper for GET /lands
 """
 
+import re
 import uuid
 from datetime import datetime
 from typing import Any, Dict, Optional
@@ -16,6 +17,64 @@ from typing import Any, Dict, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.land import LandType, SoilType
+
+
+def normalize_soil_type_value(v: Any) -> Optional[SoilType]:
+    """
+    Normalizes arbitrary or compound incoming soil type strings (e.g. 'Red Soil / Loamy',
+    'sandy loam', 'Clay', 'Red', 'black cotton') into a valid SoilType enum value.
+    """
+    if v is None or v == "":
+        return None
+    if isinstance(v, SoilType):
+        return v
+    if not isinstance(v, str):
+        return None
+
+    val_str = v.strip()
+    if not val_str:
+        return None
+
+    # Check for direct enum match (case-insensitive)
+    for item in SoilType:
+        if item.value.lower() == val_str.lower() or item.name.lower() == val_str.lower():
+            return item
+
+    # Tokenize compound strings with delimiters like '/', ',', ';', '&', '+', '()', 'and', 'or'
+    tokens = [
+        t.strip().lower()
+        for t in re.split(r'[/\\|;,+&()]|\band\b|\bor\b', val_str, flags=re.IGNORECASE)
+        if t.strip()
+    ]
+
+    def _match_token(t: str) -> Optional[SoilType]:
+        if any(k in t for k in ["black cotton", "black", "vertisol", "regur"]):
+            return SoilType.BLACK_COTTON
+        if any(k in t for k in ["red soil", "red", "acrisol", "ferralsol", "nitisol", "lixisol"]):
+            return SoilType.RED_SOIL
+        if any(k in t for k in ["clayey", "clay", "gleysol", "fluvisol", "stagnosol", "planosol"]):
+            return SoilType.CLAYEY
+        if any(k in t for k in ["sandy", "sand", "arenosol", "podzol"]):
+            return SoilType.SANDY
+        if any(k in t for k in ["rocky", "rock", "leptosol", "regosol"]):
+            return SoilType.ROCKY
+        if any(k in t for k in ["loamy", "loam", "silt", "cambisol", "luvisol", "phaeozem", "kastanozem"]):
+            return SoilType.LOAMY
+        return None
+
+    # 1. Match first valid token in compound string (e.g., 'Red Soil / Loamy' -> 'Red Soil')
+    for token in tokens:
+        matched = _match_token(token)
+        if matched is not None:
+            return matched
+
+    # 2. Scan entire lowercase string
+    matched = _match_token(val_str.lower())
+    if matched is not None:
+        return matched
+
+    # 3. Fallback to Loamy if unrecognized string
+    return SoilType.LOAMY
 
 
 class LandBase(BaseModel):
@@ -40,6 +99,12 @@ class LandBase(BaseModel):
             "quick-access representative point either way."
         ),
     )
+
+    @field_validator("soil_type", mode="before")
+    @classmethod
+    def validate_soil_type(cls, value: Any) -> Optional[SoilType]:
+        """Automatically cleans and maps compound/GIS soil strings to allowed SoilType enum."""
+        return normalize_soil_type_value(value)
 
     @field_validator("land_name", "address")
     @classmethod
@@ -90,6 +155,12 @@ class LandUpdate(BaseModel):
     water_availability: Optional[bool] = None
     electricity_availability: Optional[bool] = None
     boundary_geojson: Optional[Dict[str, Any]] = None
+
+    @field_validator("soil_type", mode="before")
+    @classmethod
+    def validate_soil_type(cls, value: Any) -> Optional[SoilType]:
+        """Automatically cleans and maps compound/GIS soil strings to allowed SoilType enum."""
+        return normalize_soil_type_value(value)
 
     @field_validator("land_name", "address")
     @classmethod
