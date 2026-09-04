@@ -1,40 +1,87 @@
+"""
+db/session.py
+-------------
+Sets up the async SQLAlchemy engine and session factory used
+throughout the application, plus the FastAPI dependency
+`get_db` that yields a request-scoped AsyncSession.
+
+Configured for high reliability across local PostgreSQL,
+Render deployments, and Supabase (specifically port 6543
+PgBouncer / Supavisor transaction pooler).
+"""
+
 import ssl
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from typing import AsyncGenerator
+
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 from sqlalchemy.pool import NullPool, QueuePool
+
 from app.core.config import settings
 
-database_url = settings.get_database_url(async_driver=True)
-is_pooler = "pooler.supabase.com" in database_url or "6543" in database_url
 
-connect_args = {}
-if is_pooler:
-    # Disable prepared statement caching for Supabase transaction mode (port 6543)
-    connect_args["statement_cache_size"] = 0
-    connect_args["prepared_statement_cache_size"] = 0
+def _build_engine() -> AsyncEngine:
+    db_url = settings.DATABASE_URL
+    is_remote = not any(loc in db_url for loc in ["localhost", "127.0.0.1", "host.docker.internal"])
+    is_supabase_pooler = ":6543" in db_url or "pooler.supabase.com" in db_url
 
-if "localhost" not in database_url and "127.0.0.1" not in database_url:
-    ssl_context = ssl.create_default_context()
-    ssl_context.check_hostname = False
-    ssl_context.verify_mode = ssl.CERT_NONE
-    connect_args["ssl"] = ssl_context
+    # Prepared statements MUST be disabled for PgBouncer / Supabase port 6543 transaction pooling
+    connect_args: dict = {
+        "statement_cache_size": 0,
+        "prepared_statement_cache_size": 0,
+    }
 
-# Use NullPool for Supabase pooler to prevent double-pooling conflicts
-pool_cls = NullPool if is_pooler else QueuePool
+    # Automatically configure SSL context for remote PostgreSQL (Supabase / Render)
+    if is_remote or "supabase.com" in db_url or "render.com" in db_url or settings.APP_ENV != "development":
+        ssl_ctx = ssl.create_default_context()
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = ssl.CERT_NONE
+        connect_args["ssl"] = ssl_ctx
 
-engine = create_async_engine(
-    database_url,
-    echo=settings.DEBUG,
-    poolclass=pool_cls,
-    connect_args=connect_args,
-    pool_pre_ping=True
-)
+    engine_kwargs: dict = {
+        "echo": settings.DEBUG,
+        "future": True,
+        "connect_args": connect_args,
+    }
 
-SessionLocal = async_sessionmaker(
+    # For transaction poolers (port 6543), use NullPool to avoid double connection pooling.
+    # For local/direct connections, use pre-ping and connection recycling.
+    if is_supabase_pooler:
+        engine_kwargs["poolclass"] = NullPool
+    else:
+        engine_kwargs["pool_pre_ping"] = True
+        engine_kwargs["pool_recycle"] = 300
+
+    return create_async_engine(db_url, **engine_kwargs)
+
+
+engine: AsyncEngine = _build_engine()
+
+# Provide both SessionLocal and AsyncSessionLocal aliases
+AsyncSessionLocal = async_sessionmaker(
     bind=engine,
     class_=AsyncSession,
-    expire_on_commit=False
+    expire_on_commit=False,
+    autoflush=False,
 )
+SessionLocal = AsyncSessionLocal
 
-async def get_db():
-    async with SessionLocal() as session:
-        yield session
+
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    """
+    FastAPI dependency that yields a database session for the
+    lifetime of a single request, and guarantees it is closed
+    (and rolled back on error) afterwards.
+    """
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
