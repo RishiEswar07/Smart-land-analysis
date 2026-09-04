@@ -1,65 +1,40 @@
-"""
-db/session.py
--------------
-Sets up the async SQLAlchemy engine and session factory used
-throughout the application, plus the FastAPI dependency
-`get_db` that yields a request-scoped AsyncSession.
-"""
-
-from typing import AsyncGenerator
-
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
-
+import ssl
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlalchemy.pool import NullPool, QueuePool
 from app.core.config import settings
 
-# ------------------------------------------------------------------
-# Async engine
-#   - pool_pre_ping: validates connections before use (avoids stale
-#     connections after DB restarts / idle timeouts)
-#   - echo: SQL logging, tied to DEBUG so it's silent in production
-# ------------------------------------------------------------------
-engine: AsyncEngine = create_async_engine(
-    settings.DATABASE_URL,
+database_url = settings.get_database_url(async_driver=True)
+is_pooler = "pooler.supabase.com" in database_url or "6543" in database_url
+
+connect_args = {}
+if is_pooler:
+    # Disable prepared statement caching for Supabase transaction mode (port 6543)
+    connect_args["statement_cache_size"] = 0
+    connect_args["prepared_statement_cache_size"] = 0
+
+if "localhost" not in database_url and "127.0.0.1" not in database_url:
+    ssl_context = ssl.create_default_context()
+    ssl_context.check_hostname = False
+    ssl_context.verify_mode = ssl.CERT_NONE
+    connect_args["ssl"] = ssl_context
+
+# Use NullPool for Supabase pooler to prevent double-pooling conflicts
+pool_cls = NullPool if is_pooler else QueuePool
+
+engine = create_async_engine(
+    database_url,
     echo=settings.DEBUG,
-    pool_pre_ping=True,
-    future=True,
+    poolclass=pool_cls,
+    connect_args=connect_args,
+    pool_pre_ping=True
 )
 
-# ------------------------------------------------------------------
-# Session factory
-#   - expire_on_commit=False: keeps ORM objects usable after commit,
-#     which matters because FastAPI serializes the response *after*
-#     the request handler (and its commit) has finished.
-# ------------------------------------------------------------------
-AsyncSessionLocal = async_sessionmaker(
+SessionLocal = async_sessionmaker(
     bind=engine,
     class_=AsyncSession,
-    expire_on_commit=False,
-    autoflush=False,
+    expire_on_commit=False
 )
 
-
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """
-    FastAPI dependency that yields a database session for the
-    lifetime of a single request, and guarantees it is closed
-    (and rolled back on error) afterwards.
-
-    Usage:
-        @router.get("/lands")
-        async def list_lands(db: AsyncSession = Depends(get_db)):
-            ...
-    """
-    async with AsyncSessionLocal() as session:
-        try:
-            yield session
-        except Exception:
-            await session.rollback()
-            raise
-        finally:
-            await session.close()
+async def get_db():
+    async with SessionLocal() as session:
+        yield session
