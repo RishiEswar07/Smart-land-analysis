@@ -34,12 +34,64 @@ export const normalizeSoilType = (rawSoil) => {
   return mapSoilType(rawSoil);
 };
 
+/**
+ * Dynamically computes a fallback geometric parcel polygon and area
+ * around the clicked coordinates (in square feet).
+ */
+export const generateEstimatedParcel = (lat, lng, sideLengthMeters = 15) => {
+  const latRad = (lat * Math.PI) / 180;
+  const metersPerDegLat = 111320;
+  const metersPerDegLng = 111320 * Math.max(Math.cos(latRad), 0.0001);
+
+  const halfLat = (sideLengthMeters / 2) / metersPerDegLat;
+  const halfLng = (sideLengthMeters / 2) / metersPerDegLng;
+
+  const minLat = lat - halfLat;
+  const maxLat = lat + halfLat;
+  const minLng = lng - halfLng;
+  const maxLng = lng + halfLng;
+
+  const coords = [
+    [minLng, minLat],
+    [maxLng, minLat],
+    [maxLng, maxLat],
+    [minLng, maxLat],
+    [minLng, minLat]
+  ];
+
+  const geojson = {
+    type: 'Feature',
+    properties: {
+      isEstimated: true,
+      center: [lng, lat],
+      sideLengthMeters
+    },
+    geometry: {
+      type: 'Polygon',
+      coordinates: [coords]
+    }
+  };
+
+  const sqMeters = area(geojson);
+  const areaSqFt = sqMeters * 10.7639104;
+
+  return {
+    available: true,
+    isEstimated: true,
+    source: `Geometric Bounding Calculation (${sideLengthMeters}m Lot)`,
+    coords: coords.map(c => ({ lat: c[1], lng: c[0] })),
+    areaSqFt: Math.round(areaSqFt * 10) / 10,
+    geojson
+  };
+};
+
 const gisService = {
   /**
-   * Automatically fetch parcel polygon, area, road width, and infrastructure
+   * Automatically fetch parcel polygon, area, road width, and infrastructure.
+   * If Overpass does not have a mapped polygon, dynamically computes a geometric fallback.
    */
   async fetchParcelData(lat, lng) {
-    // We look for a building or landuse boundary around a tight 15m radius
+    // Look for building or landuse boundary around a 15m radius
     const query = `
       [out:json][timeout:5];
       (
@@ -55,48 +107,47 @@ const gisService = {
 
     try {
       const response = await axios.post(OVERPASS_API, query);
-      const elements = response.data.elements;
+      const elements = response.data?.elements;
       
-      if (!elements || elements.length === 0) {
-        return { available: false, error: 'No mapped parcel/building boundary found here.' };
-      }
+      if (elements && elements.length > 0) {
+        const ways = elements.filter(e => e.type === 'way');
+        const nodes = elements.filter(e => e.type === 'node').reduce((acc, n) => {
+          acc[n.id] = [n.lon, n.lat];
+          return acc;
+        }, {});
 
-      // Reconstruct geometry
-      const ways = elements.filter(e => e.type === 'way');
-      const nodes = elements.filter(e => e.type === 'node').reduce((acc, n) => {
-        acc[n.id] = [n.lon, n.lat];
-        return acc;
-      }, {});
-
-      if (ways.length === 0) return { available: false, error: 'No boundary available' };
-
-      // Take the first closed way
-      const way = ways.find(w => w.nodes[0] === w.nodes[w.nodes.length - 1]);
-      if (!way) return { available: false, error: 'No closed boundary available' };
-
-      const coords = way.nodes.map(nid => nodes[nid]).filter(c => !!c);
-      
-      const geojson = {
-        type: 'Feature',
-        geometry: {
-          type: 'Polygon',
-          coordinates: [coords]
+        if (ways.length > 0) {
+          const way = ways.find(w => w.nodes && w.nodes[0] === w.nodes[w.nodes.length - 1]);
+          if (way && way.nodes) {
+            const coords = way.nodes.map(nid => nodes[nid]).filter(Boolean);
+            if (coords.length >= 4) {
+              const geojson = {
+                type: 'Feature',
+                geometry: {
+                  type: 'Polygon',
+                  coordinates: [coords]
+                }
+              };
+              const sqMeters = area(geojson);
+              const areaSqFt = sqMeters * 10.7639104;
+              return {
+                available: true,
+                isEstimated: false,
+                source: 'OpenStreetMap / Overpass (Boundary)',
+                coords: coords.map(c => ({ lat: c[1], lng: c[0] })),
+                areaSqFt: Math.round(areaSqFt * 10) / 10,
+                geojson
+              };
+            }
+          }
         }
-      };
-
-      const sqMeters = area(geojson);
-      const areaSqFt = sqMeters * 10.7639104;
-
-      return {
-        available: true,
-        coords: coords.map(c => ({ lat: c[1], lng: c[0] })),
-        areaSqFt,
-        geojson
-      };
+      }
     } catch (error) {
-      console.error('Overpass parcel fetch error:', error);
-      return { available: false, error: 'API failure' };
+      console.warn('Overpass parcel fetch failed, using geometric calculation:', error);
     }
+
+    // Dynamic geometric fallback calculation based on clicked coordinates
+    return generateEstimatedParcel(lat, lng, 15);
   },
 
   /**

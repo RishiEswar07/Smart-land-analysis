@@ -56,7 +56,15 @@ export default function LandAnalysis() {
   const handleManualBoundary = (boundary) => {
     setActiveBoundary(boundary)
     if (boundary?.areaSqFt) {
-      setGisData(prev => ({ ...prev, area_sqft: boundary.areaSqFt, boundary_geojson: boundary.geojson }))
+      const rounded = Math.round(boundary.areaSqFt);
+      setManualArea(String(rounded));
+      setGisData(prev => ({
+        ...prev,
+        area_sqft: boundary.areaSqFt,
+        boundary_geojson: boundary.geojson,
+        is_estimated: false,
+        area_source: 'Drawn Boundary'
+      }))
     }
   }
 
@@ -73,16 +81,29 @@ export default function LandAnalysis() {
       // Run concurrent GIS queries
       const [address, parcel, infra, soil, landCover] = await Promise.all([
         geocodeService.reverseGeocode(lat, lng).catch(() => 'Data Not Available'),
-        !activeBoundary ? gisService.fetchParcelData(lat, lng) : Promise.resolve({ available: true, areaSqFt: activeBoundary.areaSqFt, geojson: activeBoundary.geojson }),
+        !activeBoundary
+          ? gisService.fetchParcelData(lat, lng)
+          : Promise.resolve({
+              available: true,
+              isEstimated: false,
+              areaSqFt: activeBoundary.areaSqFt,
+              geojson: activeBoundary.geojson,
+              source: 'Drawn Boundary'
+            }),
         gisService.fetchInfrastructure(lat, lng),
         gisService.fetchSoilType(lat, lng),
         gisService.fetchLandCover(lat, lng).catch(() => ({ available: false }))
       ]);
 
+      const initialArea = parcel?.areaSqFt ? Math.round(parcel.areaSqFt) : 2400;
+      setManualArea(String(initialArea));
+
       setGisData({
         address: address !== 'Data Not Available' ? address : null,
-        area_sqft: parcel.available ? parcel.areaSqFt : null,
-        boundary_geojson: parcel.available ? parcel.geojson : null,
+        area_sqft: initialArea,
+        boundary_geojson: parcel?.geojson || activeBoundary?.geojson || null,
+        is_estimated: Boolean(parcel?.isEstimated),
+        area_source: parcel?.source || (activeBoundary ? 'Drawn Boundary' : 'OpenStreetMap / Overpass'),
         road_width: infra.available ? infra.roadWidth : 20,
         water_availability: infra.available ? infra.water : true,
         electricity_availability: infra.available ? infra.electricity : true,
@@ -91,11 +112,6 @@ export default function LandAnalysis() {
         lat,
         lng
       });
-
-      if (!parcel.available && !activeBoundary) {
-        setManualArea('1500'); // Pre-fill 1500 sq.ft lot estimation so button is immediately active
-        setShowManualDraw(false);
-      }
 
       setStep('summary');
     } catch (err) {
@@ -107,8 +123,17 @@ export default function LandAnalysis() {
   }
 
   const handleAnalyze = async () => {
-    const finalArea = gisData.area_sqft || Number(manualArea) || null;
-    if (!finalArea) {
+    let finalArea = null;
+    if (gisData.area_sqft && !isNaN(Number(gisData.area_sqft)) && Number(gisData.area_sqft) > 0) {
+      finalArea = Number(gisData.area_sqft);
+    } else if (manualArea) {
+      const parsed = parseFloat(String(manualArea).replace(/,/g, '').trim());
+      if (!isNaN(parsed) && parsed > 0) {
+        finalArea = parsed;
+      }
+    }
+
+    if (!finalArea || finalArea <= 0) {
       setError("Area is required for feasibility analysis. Please enter an area or draw the boundary.");
       return;
     }
@@ -117,17 +142,17 @@ export default function LandAnalysis() {
     setError(null)
     try {
       const land = await landService.createLand({
-        land_name: gisData.address ? gisData.address.split(',')[0] : 'Selected Plot',
+        land_name: gisData.address ? gisData.address.split(',')[0].trim() : 'Selected Plot',
         latitude: gisData.lat,
         longitude: gisData.lng,
         address: gisData.address || "Unknown Address",
         area_sqft: finalArea,
-        road_width: gisData.road_width,
+        road_width: gisData.road_width || 20,
         soil_type: normalizeSoilType(gisData.soil_type),
         land_type: "Residential", // Default generic zoning
-        water_availability: gisData.water_availability,
-        electricity_availability: gisData.electricity_availability,
-        boundary_geojson: gisData.boundary_geojson,
+        water_availability: gisData.water_availability !== null ? gisData.water_availability : true,
+        electricity_availability: gisData.electricity_availability !== null ? gisData.electricity_availability : true,
+        boundary_geojson: gisData.boundary_geojson || activeBoundary?.geojson || null,
       })
 
       const analysis = await analysisService.predict(land.id)
@@ -309,10 +334,21 @@ export default function LandAnalysis() {
               <div className="flex justify-between items-center py-3 border-b border-slate-100">
                 <div>
                   <p className="text-sm font-bold text-slate-700">Parcel Area</p>
-                  <p className="text-[10px] text-slate-400">Source: OpenStreetMap / Overpass (Building/Landuse)</p>
+                  <p className="text-[10px] text-slate-400">
+                    Source: {gisData.area_source || (activeBoundary ? 'Drawn Boundary' : 'OpenStreetMap / Overpass')}
+                  </p>
                 </div>
                 {gisData.area_sqft ? (
-                  <span className="text-sm font-black text-blue-600">{Math.round(gisData.area_sqft).toLocaleString()} sq.ft</span>
+                  <div className="text-right">
+                    <span className="text-sm font-black text-blue-600">
+                      {Math.round(gisData.area_sqft).toLocaleString()} sq.ft
+                    </span>
+                    {gisData.is_estimated && !activeBoundary && (
+                      <span className="block text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full mt-0.5">
+                        Dynamic Bounding Calculation
+                      </span>
+                    )}
+                  </div>
                 ) : (
                   <span className="text-sm text-red-500 font-bold">Data Not Available</span>
                 )}
@@ -374,46 +410,54 @@ export default function LandAnalysis() {
               </div>
             </div>
 
-            {/* FALLBACK FOR MISSING AREA */}
-            {!gisData.area_sqft && (
-              <div className="mt-6 bg-red-50 border border-red-200 rounded-xl p-5">
-                <p className="text-sm font-bold text-red-700 mb-2">⚠️ Exact land parcel area data is not available for this location.</p>
-                <p className="text-xs text-red-600 mb-4">Area is strictly required for the feasibility algorithm. Please provide a fallback:</p>
-                
-                <div className="flex flex-col sm:flex-row gap-4">
-                  <div className="flex-1">
-                    <label className="text-xs font-bold text-slate-700 mb-1 block">Enter area manually (sq.ft)</label>
-                    <input 
-                      type="number" 
-                      value={manualArea}
-                      onChange={(e) => setManualArea(e.target.value)}
-                      className="w-full px-3 py-2 border border-slate-300 rounded focus:border-blue-500 text-sm"
-                      placeholder="e.g. 2400"
-                    />
-                  </div>
-                  <div className="flex-1 flex items-end">
-                    <button 
-                      onClick={() => setShowManualDraw(!showManualDraw)}
-                      className="w-full px-3 py-2 bg-white border border-slate-300 text-slate-700 rounded font-semibold text-sm hover:bg-slate-50 transition-colors"
-                    >
-                      {showManualDraw ? 'Hide Map' : 'Or Draw Boundary'}
-                    </button>
-                  </div>
-                </div>
-
-                {showManualDraw && (
-                  <div className="mt-4 h-[300px] border border-slate-300 rounded overflow-hidden">
-                    <MapPicker
-                      center={{ lat: gisData.lat, lng: gisData.lng }}
-                      zoom={19}
-                      drawable={true}
-                      onPolygonChange={handleManualBoundary}
-                      height="300px"
-                    />
-                  </div>
-                )}
+            {/* OPTIONAL CUSTOMIZATION / ADJUSTMENT */}
+            <div className="mt-6 bg-slate-50 border border-slate-200 rounded-xl p-5">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-sm font-bold text-slate-800">Customize Area / Draw Custom Boundary</p>
+                <span className="text-xs text-slate-500 font-medium">Computed: {Math.round(gisData.area_sqft || 0).toLocaleString()} sq.ft</span>
               </div>
-            )}
+              <p className="text-xs text-slate-500 mb-4">You can adjust the area in sq.ft below or draw a custom boundary directly on the map:</p>
+              
+              <div className="flex flex-col sm:flex-row gap-4">
+                <div className="flex-1">
+                  <label className="text-xs font-bold text-slate-700 mb-1 block">Custom area (sq.ft)</label>
+                  <input 
+                    type="number" 
+                    value={manualArea}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setManualArea(val);
+                      const parsed = parseFloat(val);
+                      if (!isNaN(parsed) && parsed > 0) {
+                        setGisData(prev => ({ ...prev, area_sqft: parsed, is_estimated: false, area_source: 'Manual Custom Area' }));
+                      }
+                    }}
+                    className="w-full px-3 py-2 border border-slate-300 rounded focus:border-blue-500 text-sm font-medium bg-white"
+                    placeholder="e.g. 2400"
+                  />
+                </div>
+                <div className="flex-1 flex items-end">
+                  <button 
+                    onClick={() => setShowManualDraw(!showManualDraw)}
+                    className="w-full px-3 py-2 bg-white border border-slate-300 text-slate-700 rounded font-semibold text-sm hover:bg-slate-100 transition-colors shadow-sm"
+                  >
+                    {showManualDraw ? 'Hide Map Drawing' : '✏️ Draw Custom Boundary'}
+                  </button>
+                </div>
+              </div>
+
+              {showManualDraw && (
+                <div className="mt-4 h-[300px] border border-slate-300 rounded overflow-hidden">
+                  <MapPicker
+                    center={{ lat: gisData.lat, lng: gisData.lng }}
+                    zoom={19}
+                    drawable={true}
+                    onPolygonChange={handleManualBoundary}
+                    height="300px"
+                  />
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="flex flex-col gap-4">
