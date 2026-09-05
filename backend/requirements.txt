@@ -38,3 +38,4 @@ scikit-learn
 pandas
 rasterio>=1.4.0
 requests>=2.31.0
+openpyxl==3.1.5

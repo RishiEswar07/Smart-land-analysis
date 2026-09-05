@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts'
 import StatCard from '../components/StatCard'
 import ScoreGauge from '../components/ScoreGauge'
@@ -5,6 +6,7 @@ import RiskCard from '../components/RiskCard'
 import FacilityCard from '../components/FacilityCard'
 import Loader from '../components/Loader'
 import ErrorState from '../components/ErrorState'
+import DetailedLandAnalysisModal from '../components/DetailedLandAnalysisModal'
 import useFetch from '../hooks/useFetch'
 import dashboardService from '../services/dashboardService'
 import landService from '../services/landService'
@@ -20,8 +22,10 @@ function riskBadgeClass(level) {
 }
 
 export default function Dashboard() {
+  const [selectedAnalysisId, setSelectedAnalysisId] = useState(null)
   const { data: summary, loading: loadingSummary, error: errorSummary, refetch: refetchSummary } =
     useFetch(dashboardService.getSummary, [])
+
 
   const { data: distribution, loading: loadingDist } = useFetch(dashboardService.getBuildingDistribution, [])
 
@@ -77,10 +81,17 @@ export default function Dashboard() {
         <div className="mb-10">
           <h2 className="font-display font-semibold text-ink text-lg mb-4">Latest analysis</h2>
           <div className="grid lg:grid-cols-[260px_1fr] gap-5">
-            <div className="card-base p-6 flex flex-col items-center text-center">
+            <div 
+              onClick={() => setSelectedAnalysisId(latest.id)}
+              className="card-base p-6 flex flex-col items-center text-center cursor-pointer hover:border-blue-500 hover:shadow-md transition-all group relative"
+              title="Click for detailed factor breakdown and report options"
+            >
               <ScoreGauge score={latest.suitability_score ?? 0} size={150} />
               <p className="text-xs font-semibold text-ink mt-2">{latest.recommended_building_type}</p>
               <p className="text-[11px] text-slate-dim">{latest.location_label || 'Selected plot'}</p>
+              <span className="text-[10px] font-bold text-blue-600 group-hover:underline mt-2 inline-flex items-center gap-1">
+                Click for detailed factor breakdown →
+              </span>
             </div>
             <div className="grid sm:grid-cols-2 gap-4">
               <RiskCard
@@ -161,14 +172,24 @@ export default function Dashboard() {
                 <th className="px-5 py-3">Score</th>
                 <th className="px-5 py-3">Flood Risk</th>
                 <th className="px-5 py-3">Date</th>
+                <th className="px-5 py-3 text-right">Action</th>
               </tr>
             </thead>
             <tbody>
               {(recent ?? []).map((row) => (
-                <tr key={row.id} className="border-b border-line last:border-0">
+                <tr key={row.id} className="border-b border-line last:border-0 hover:bg-slate-50/50 transition-colors">
                   <td className="px-5 py-3.5 text-ink">{row.location_label || '—'}</td>
                   <td className="px-5 py-3.5 text-slate">{row.recommended_building_type}</td>
-                  <td className="px-5 py-3.5 font-semibold text-ink">{row.suitability_score}%</td>
+                  <td className="px-5 py-3.5">
+                    <button
+                      onClick={() => setSelectedAnalysisId(row.id)}
+                      className="font-bold text-blue-600 hover:text-blue-800 hover:underline inline-flex items-center gap-1"
+                      title="Click to view detailed factor breakdown"
+                    >
+                      <span>{row.suitability_score}%</span>
+                      <span className="text-[10px]">🔍</span>
+                    </button>
+                  </td>
                   <td className="px-5 py-3.5">
                     <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${riskBadgeClass(row.flood_risk)}`}>
                       {row.flood_risk ?? 'Unknown'}
@@ -177,11 +198,19 @@ export default function Dashboard() {
                   <td className="px-5 py-3.5 text-slate-dim text-xs">
                     {row.analyzed_at ? new Date(row.analyzed_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '—'}
                   </td>
+                  <td className="px-5 py-3.5 text-right">
+                    <button
+                      onClick={() => setSelectedAnalysisId(row.id)}
+                      className="text-xs font-bold text-blue-600 hover:text-blue-800 hover:underline"
+                    >
+                      Detailed Report →
+                    </button>
+                  </td>
                 </tr>
               ))}
               {(!recent || recent.length === 0) && (
                 <tr>
-                  <td colSpan={5} className="px-5 py-10 text-center text-slate-dim text-sm">
+                  <td colSpan={6} className="px-5 py-10 text-center text-slate-dim text-sm">
                     No analyses yet — run your first one from the Land Analysis page.
                   </td>
                 </tr>
@@ -190,6 +219,14 @@ export default function Dashboard() {
           </table>
         </div>
       </div>
+
+      {/* Detailed Land Analysis Modal */}
+      <DetailedLandAnalysisModal
+        isOpen={Boolean(selectedAnalysisId)}
+        onClose={() => setSelectedAnalysisId(null)}
+        analysisId={selectedAnalysisId}
+      />
     </div>
   )
 }
+

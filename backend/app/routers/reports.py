@@ -12,7 +12,7 @@ Matches src/services/reportService.js exactly.
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,7 +23,7 @@ from app.schemas.report import ReportResponse
 from app.services import report_service
 from app.services.exceptions import NotFoundError
 
-router = APIRouter(prefix="/reports", tags=["PDF Reports"])
+router = APIRouter(prefix="/reports", tags=["PDF & Multi-Format Reports"])
 
 
 @router.post(
@@ -46,6 +46,70 @@ async def generate_report(
     reports = await report_service.list_reports(db, current_user.id)
     match = next((r for r in reports if r["id"] == report.id), None)
     return ReportResponse(**match)
+
+
+@router.get(
+    "/{analysis_id}/export/pdf",
+    status_code=status.HTTP_200_OK,
+    summary="Stream dynamic PDF report directly",
+)
+async def export_pdf_report(
+    analysis_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        pdf_bytes, land_name = await report_service.get_or_generate_pdf_bytes(db, analysis_id, current_user.id)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    safe_name = "".join(c if c.isalnum() or c in " -_" else "_" for c in land_name).strip() or "land"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}-land-analysis-report.pdf"'},
+    )
+
+
+@router.get(
+    "/{analysis_id}/export/excel",
+    status_code=status.HTTP_200_OK,
+    summary="Export multi-sheet Excel (.xlsx) workbook report",
+)
+async def export_excel_report(
+    analysis_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        excel_bytes, land_name = await report_service.get_or_generate_excel_report(db, analysis_id, current_user.id)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    safe_name = "".join(c if c.isalnum() or c in " -_" else "_" for c in land_name).strip() or "land"
+    return Response(
+        content=excel_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}-land-analysis-report.xlsx"'},
+    )
+
+
+@router.get(
+    "/{analysis_id}/export/json",
+    status_code=status.HTTP_200_OK,
+    summary="Export comprehensive 15-section report payload in JSON",
+)
+async def export_json_report(
+    analysis_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        json_data = await report_service.get_or_generate_json_report(db, analysis_id, current_user.id)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    return json_data
 
 
 @router.get(
@@ -83,3 +147,4 @@ async def list_reports(
 ) -> list[ReportResponse]:
     data = await report_service.list_reports(db, current_user.id)
     return [ReportResponse(**item) for item in data]
+

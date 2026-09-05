@@ -1,7 +1,7 @@
 """
 services/report_service.py
 -----------------------------
-Business logic for PDF Report generation and retrieval.
+Business logic for Multi-Format Report generation and retrieval (PDF, Excel, JSON).
 """
 
 import os
@@ -14,7 +14,9 @@ from app.core.config import settings
 from app.models.analysis import Analysis
 from app.models.land import Land
 from app.models.report import Report
+from app.services.analysis_service import build_detailed_analysis_dict
 from app.services.exceptions import NotFoundError
+from app.utils.excel_generator import generate_land_report_excel
 from app.utils.pdf_generator import generate_land_report_pdf
 
 
@@ -41,7 +43,8 @@ async def generate_report(db: AsyncSession, analysis_id: uuid.UUID, user_id: uui
         raise NotFoundError(entity="Analysis", identifier=str(analysis_id))
     analysis, land = row
 
-    pdf_bytes = generate_land_report_pdf(land, analysis)
+    details = build_detailed_analysis_dict(land, analysis)
+    pdf_bytes = generate_land_report_pdf(land, analysis, details)
 
     filename = f"report_{analysis.id}.pdf"
     file_path = os.path.join(_reports_dir(), filename)
@@ -53,6 +56,55 @@ async def generate_report(db: AsyncSession, analysis_id: uuid.UUID, user_id: uui
     await db.commit()
     await db.refresh(report)
     return report
+
+
+async def get_or_generate_pdf_bytes(db: AsyncSession, analysis_id: uuid.UUID, user_id: uuid.UUID) -> tuple[bytes, str]:
+    """Generates and returns (pdf_bytes, land_name) for direct streaming export."""
+    result = await db.execute(
+        select(Analysis, Land)
+        .join(Land, Analysis.land_id == Land.id)
+        .where(Analysis.id == analysis_id, Land.user_id == user_id)
+    )
+    row = result.first()
+    if row is None:
+        raise NotFoundError(entity="Analysis", identifier=str(analysis_id))
+    analysis, land = row
+
+    details = build_detailed_analysis_dict(land, analysis)
+    pdf_bytes = generate_land_report_pdf(land, analysis, details)
+    return pdf_bytes, land.land_name or "land"
+
+
+async def get_or_generate_excel_report(db: AsyncSession, analysis_id: uuid.UUID, user_id: uuid.UUID) -> tuple[bytes, str]:
+    """Generates a structured .xlsx report workbook and returns (excel_bytes, land_name)."""
+    result = await db.execute(
+        select(Analysis, Land)
+        .join(Land, Analysis.land_id == Land.id)
+        .where(Analysis.id == analysis_id, Land.user_id == user_id)
+    )
+    row = result.first()
+    if row is None:
+        raise NotFoundError(entity="Analysis", identifier=str(analysis_id))
+    analysis, land = row
+
+    details = build_detailed_analysis_dict(land, analysis)
+    excel_bytes = generate_land_report_excel(land, analysis, details)
+    return excel_bytes, land.land_name or "land"
+
+
+async def get_or_generate_json_report(db: AsyncSession, analysis_id: uuid.UUID, user_id: uuid.UUID) -> dict:
+    """Returns comprehensive JSON export payload containing all 15 report sections."""
+    result = await db.execute(
+        select(Analysis, Land)
+        .join(Land, Analysis.land_id == Land.id)
+        .where(Analysis.id == analysis_id, Land.user_id == user_id)
+    )
+    row = result.first()
+    if row is None:
+        raise NotFoundError(entity="Analysis", identifier=str(analysis_id))
+    analysis, land = row
+
+    return build_detailed_analysis_dict(land, analysis)
 
 
 async def get_report_file(db: AsyncSession, report_id: uuid.UUID, user_id: uuid.UUID) -> tuple[str, str]:

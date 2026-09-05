@@ -8,6 +8,7 @@ import RiskBreakdownList from '../components/RiskBreakdownList'
 import Loader from '../components/Loader'
 import ErrorState from '../components/ErrorState'
 import House3DModel from '../components/House3DModel'
+import DetailedLandAnalysisModal from '../components/DetailedLandAnalysisModal'
 import useGeolocation from '../hooks/useGeolocation'
 import landService from '../services/landService'
 import analysisService from '../services/analysisService'
@@ -62,9 +63,11 @@ export default function LandAnalysis() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState(null)
   const [result, setResult] = useState(savedState?.result || null)
+  const [showDetailedModal, setShowDetailedModal] = useState(false)
 
   // Fallback for missing area
   const [manualArea, setManualArea] = useState(savedState?.manualArea || '')
+
   const [showManualDraw, setShowManualDraw] = useState(false)
 
   // Sync state to sessionStorage whenever key properties change
@@ -689,10 +692,22 @@ export default function LandAnalysis() {
               
               {/* Suitability Dashboard */}
               <div className="grid sm:grid-cols-2 gap-5">
-                <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex flex-col items-center text-center">
+                <div 
+                  onClick={() => setShowDetailedModal(true)}
+                  className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex flex-col items-center text-center cursor-pointer hover:border-blue-500 hover:shadow-md transition-all group relative"
+                  title="Click to view detailed factor breakdown and transparent scores"
+                >
+                  <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
+                      Click to Inspect 🔍
+                    </span>
+                  </div>
+
                   <ScoreGauge score={result.suitability_score ?? 0} />
-                  <p className="text-xs text-slate-500 mt-3">ML Suitability Score</p>
-                  <p className="text-[10px] text-slate-400 mt-1">Source: Scikit-Learn RandomForest Model</p>
+                  <p className="text-xs text-slate-500 mt-3 font-semibold">ML Suitability Score</p>
+                  <span className="text-[11px] font-bold text-blue-600 group-hover:underline mt-0.5 inline-flex items-center gap-1">
+                    Click for detailed factor breakdown →
+                  </span>
                   
                   <div className="mt-5 pt-5 border-t border-slate-100 w-full">
                     <p className="text-xs text-slate-500">Selected building type</p>
@@ -763,9 +778,15 @@ export default function LandAnalysis() {
                 </div>
               </div>
 
-              <div className="flex flex-wrap gap-4 mt-8 pt-6 border-t border-slate-200">
+              <div className="flex flex-wrap items-center gap-4 mt-8 pt-6 border-t border-slate-200">
                 <button
-                  className="px-5 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
+                  className="px-5 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition-colors shadow-sm flex items-center gap-2"
+                  onClick={() => setShowDetailedModal(true)}
+                >
+                  <span>📊 Generate Land Analysis Report</span>
+                </button>
+                <button
+                  className="px-5 py-3 border border-slate-300 text-slate-700 font-semibold rounded-lg hover:bg-slate-50 transition-colors"
                   onClick={resetFlow}
                 >
                   Analyze New Land
@@ -778,6 +799,12 @@ export default function LandAnalysis() {
                 </button>
               </div>
 
+              {/* Detailed Breakdown & Export Modal */}
+              <DetailedLandAnalysisModal
+                isOpen={showDetailedModal}
+                onClose={() => setShowDetailedModal(false)}
+                analysisId={result.id}
+              />
             </div>
           )}
         </>
@@ -785,3 +812,4 @@ export default function LandAnalysis() {
     </div>
   )
 }
+

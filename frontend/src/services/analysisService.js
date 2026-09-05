@@ -10,7 +10,10 @@ const analysisService = {
 
   getAnalysisById: (id) => api.get(`/analysis/${id}`).then((res) => res.data),
 
+  getDetailedAnalysis: (id) => api.get(`/analysis/${id}/details`).then((res) => res.data),
+
   getAnalysesForLand: (landId) => api.get(`/lands/${landId}/analyses`).then((res) => res.data),
 }
 
 export default analysisService
+

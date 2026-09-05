@@ -48,8 +48,6 @@ class AnalysisResponse(BaseModel):
     infrastructure_score: float = Field(..., ge=0, le=100)
     traffic_accessibility_score: float = Field(..., ge=0, le=100)
 
-    # ---- Dedicated Risk Analysis ----
-    # risk_score: 0-100, HIGHER = MORE RISK. Bands: Low 0-30, Moderate 31-60, High 61-100.
     risk_score: float = Field(..., ge=0, le=100)
     risk_level: str
     risk_breakdown: Dict[str, RiskFactorScore]
@@ -57,5 +55,48 @@ class AnalysisResponse(BaseModel):
     ai_explanation: str
 
     created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class FactorScoreItem(BaseModel):
+    """One factor score in the detailed suitability breakdown."""
+    name: str
+    score: float | None = Field(None, description="Score 0-100, or None if data unavailable")
+    impact: str = Field(..., description="Positive, Moderate, Negative, or Data unavailable")
+    weight: float | None = None
+    description: str = ""
+
+
+class DataQualityItem(BaseModel):
+    """Quality and completeness metric for one data source category."""
+    category: str
+    completeness_pct: float = Field(..., ge=0, le=100)
+    status: str
+    basis: str
+
+
+class ProvenanceItem(BaseModel):
+    """Exact provenance and metadata for an integrated GIS data source."""
+    dataset_name: str
+    source: str
+    data_date: str
+    resolution: str
+    processing_method: str
+    last_updated: str
+
+
+class DetailedAnalysisResponse(BaseModel):
+    """Complete detailed land analysis response with factors, provenance, quality & breakdown."""
+    property_info: dict
+    suitability: dict
+    factors: list[FactorScoreItem]
+    risks: dict
+    score_calculation: dict
+    data_quality: dict
+    data_sources: list[ProvenanceItem]
+    historical_change: dict
+    recommendation: dict
+    disclaimer: str
 
     model_config = ConfigDict(from_attributes=True)

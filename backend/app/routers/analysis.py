@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.dependencies.auth import get_current_user
 from app.models.user import User
-from app.schemas.analysis import AnalysisPredictRequest, AnalysisResponse
+from app.schemas.analysis import AnalysisPredictRequest, AnalysisResponse, DetailedAnalysisResponse
 from app.services import analysis_service
 from app.services.exceptions import NotFoundError
 
@@ -48,6 +48,25 @@ async def predict(
 
 
 @router.get(
+    "/{analysis_id}/details",
+    response_model=DetailedAnalysisResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get complete transparent breakdown, factor scores, provenance, and data quality",
+)
+async def get_detailed_analysis(
+    analysis_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> DetailedAnalysisResponse:
+    """Fetches detailed analysis for the specified analysis ID owned by user."""
+    try:
+        details = await analysis_service.get_detailed_analysis_by_id(db, analysis_id, current_user.id)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return DetailedAnalysisResponse(**details)
+
+
+@router.get(
     "/{analysis_id}",
     response_model=AnalysisResponse,
     status_code=status.HTTP_200_OK,
@@ -64,3 +83,4 @@ async def get_analysis(
     except NotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return AnalysisResponse.model_validate(analysis)
+
