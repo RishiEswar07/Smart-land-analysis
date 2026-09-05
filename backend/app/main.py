@@ -27,20 +27,26 @@ async def lifespan(app: FastAPI):
     Runs once on startup and once on shutdown.
     Verifies DB connectivity without crashing the process if the database
     is waking up or temporarily spinning up (e.g. Supabase cold starts).
+    Also ensures all required database tables exist.
     """
     logger.info("Starting %s [%s environment]", settings.APP_NAME, settings.APP_ENV)
 
-    # Verify database connectivity at startup
+    # Verify database connectivity and initialize tables if needed
     try:
         from app.db.session import engine
+        from app.db.base import Base
         from sqlalchemy import text
 
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
         logger.info("Database connection verified successfully.")
+
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("Database schema verified / initialized.")
     except Exception as exc:
         logger.warning(
-            "Database connection could not be established at startup: %s. "
+            "Database connection/initialization warning at startup: %s. "
             "The server will continue running to handle cold starts.",
             exc,
         )
@@ -80,22 +86,25 @@ def create_application() -> FastAPI:
     )
 
     # ---------------- CORS ----------------
-    default_dev_origins = [
+    # Allows Vercel production frontend and local dev environments
+    default_origins = [
+        "https://smart-land-analysis.vercel.app",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "http://localhost:5174",
         "http://127.0.0.1:5174",
     ]
-    allow_origins = (
-        settings.BACKEND_CORS_ORIGINS
-        if settings.BACKEND_CORS_ORIGINS
-        else (default_dev_origins if settings.APP_ENV == "development" else ["*"])
-    )
+    configured_origins = list(settings.BACKEND_CORS_ORIGINS) if settings.BACKEND_CORS_ORIGINS else []
+    
+    # Merge configured origins with default origins
+    for orig in default_origins:
+        if orig not in configured_origins:
+            configured_origins.append(orig)
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=allow_origins,
-        allow_origin_regex=r"http://(localhost|127\.0\.0\.1)(:\d+)?" if settings.APP_ENV == "development" else None,
+        allow_origins=configured_origins if "*" not in configured_origins else ["*"],
+        allow_origin_regex=r"https://.*\.vercel\.app|http://(localhost|127\.0\.0\.1)(:\d+)?" if "*" not in configured_origins else None,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

@@ -1,20 +1,35 @@
 import axios from 'axios'
 
 /**
- * Central Axios instance for the whole app.
- * Base URL comes from .env (VITE_API_BASE_URL) so it's a single
- * place to change when moving from local -> deployed backend.
- * In development, fall back to the current browser hostname so
- * localhost and 127.0.0.1 both work cleanly.
+ * Resolves the appropriate backend API base URL:
+ * 1. Explicit environment variable: VITE_API_BASE_URL (if set)
+ * 2. Local development: http://localhost:8000/api/v1 (when on localhost or 127.0.0.1)
+ * 3. Production deployment (Vercel / live domain): https://smart-land-analysis.onrender.com/api/v1
  */
-const defaultApiBaseUrl = `http://${window.location.hostname}:8000/api/v1`
+const getApiBaseUrl = () => {
+  const envUrl = import.meta.env.VITE_API_BASE_URL
+  if (envUrl && typeof envUrl === 'string' && envUrl.trim() !== '') {
+    return envUrl.trim().replace(/\/+$/, '')
+  }
+
+  // Check if running in browser on localhost
+  if (typeof window !== 'undefined' && window.location) {
+    const host = window.location.hostname
+    if (host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0') {
+      return `http://${host}:8000/api/v1`
+    }
+  }
+
+  // Production default for Vercel and deployed environments
+  return 'https://smart-land-analysis.onrender.com/api/v1'
+}
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || defaultApiBaseUrl,
+  baseURL: getApiBaseUrl(),
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 15000,
+  timeout: 30000,
 })
 
 // ---- Request interceptor: attach JWT access token if present ----
@@ -53,7 +68,6 @@ function extractErrorMessage(error) {
   if (Array.isArray(detail)) {
     return detail
       .map((d) => {
-        // d.loc is usually like ["body", "land_name"] — show just the field name
         const field = Array.isArray(d.loc) ? d.loc[d.loc.length - 1] : null
         return field ? `${field}: ${d.msg}` : d.msg
       })
