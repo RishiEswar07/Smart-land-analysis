@@ -4,6 +4,8 @@ import area from '@turf/area'
 import centroid from '@turf/centroid'
 import 'maplibre-gl/dist/maplibre-gl.css'
 
+import { calculatePolygonAreaSqFt } from '../services/gisService'
+
 const SQM_TO_SQFT = 10.7639104
 
 class MapErrorBoundary extends React.Component {
@@ -110,22 +112,27 @@ export default function MapPicker({
     setMousePos(null)
 
     try {
+      const coordsRing = [...draftCoords.map(c => [c.lng, c.lat]), [draftCoords[0].lng, draftCoords[0].lat]]
       const geojson = {
         type: 'Feature',
         geometry: {
           type: 'Polygon',
-          coordinates: [[...draftCoords.map(c => [c.lng, c.lat]), [draftCoords[0].lng, draftCoords[0].lat]]]
+          coordinates: [coordsRing]
         }
       }
 
-      const areaSqFt = area(geojson) * SQM_TO_SQFT
+      let areaSqFt = calculatePolygonAreaSqFt(draftCoords)
+      if (!areaSqFt || areaSqFt <= 0) {
+        areaSqFt = area(geojson) * SQM_TO_SQFT
+      }
+      
       const centerFeature = centroid(geojson)
       const cent = { 
         lat: centerFeature.geometry.coordinates[1],
         lng: centerFeature.geometry.coordinates[0] 
       }
 
-      onPolygonChange?.({ coords: draftCoords, areaSqFt, centroid: cent, geojson })
+      onPolygonChange?.({ coords: draftCoords, areaSqFt: Math.round(areaSqFt * 10) / 10, centroid: cent, geojson })
     } catch (err) {
       console.error("Error calculating polygon area/centroid:", err)
     }

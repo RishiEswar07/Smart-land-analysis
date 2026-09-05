@@ -218,6 +218,69 @@ async def _fetch_realtime_metrics(lat: float, lng: float):
         logger.error(f"Error fetching real-time metrics: {e}")
     return elevation, discharge
 
+def compute_hydrological_flood_risk(
+    elevation: float,
+    discharge: float,
+    soil_type: str = "Loamy",
+    land_cover_category: str = None
+) -> float:
+    """
+    Physically-based continuous hydrological flood risk scoring.
+    Combines:
+    1. Geomorphic elevation baseline (meters above sea level)
+    2. Real-time river discharge (m³/s from Open-Meteo Flood API)
+    3. Soil percolation & drainage capacity
+    4. Satellite land cover proximity / water bodies
+    """
+    # 1. Elevation Curve
+    # Lowlands (<10m) have high baseline flood vulnerability;
+    # Uplands & hills (>100m) have low to negligible baseline river flooding.
+    if elevation <= 5.0:
+        elev_risk = 85.0 - (elevation / 5.0) * 10.0
+    elif elevation <= 20.0:
+        elev_risk = 75.0 - ((elevation - 5.0) / 15.0) * 25.0
+    elif elevation <= 50.0:
+        elev_risk = 50.0 - ((elevation - 20.0) / 30.0) * 22.0
+    elif elevation <= 100.0:
+        elev_risk = 28.0 - ((elevation - 50.0) / 50.0) * 14.0
+    elif elevation <= 200.0:
+        elev_risk = 14.0 - ((elevation - 100.0) / 100.0) * 8.0
+    else:
+        elev_risk = max(3.0, 6.0 - ((elevation - 200.0) / 300.0) * 3.0)
+
+    # 2. River Discharge Impact (Open-Meteo daily river discharge in m³/s)
+    if discharge <= 10.0:
+        flow_risk = 0.0
+    elif discharge <= 100.0:
+        flow_risk = (discharge / 100.0) * 15.0
+    elif discharge <= 500.0:
+        flow_risk = 15.0 + ((discharge - 100.0) / 400.0) * 25.0
+    elif discharge <= 1500.0:
+        flow_risk = 40.0 + ((discharge - 500.0) / 1000.0) * 30.0
+    else:
+        flow_risk = min(85.0, 70.0 + ((discharge - 1500.0) / 2000.0) * 15.0)
+
+    # If elevation is high (> 120m), high river flow in distant regional channels has reduced impact on the plot
+    if elevation > 120.0:
+        flow_risk = flow_risk * max(0.1, (250.0 - elevation) / 130.0)
+
+    # 3. Soil Drainage Adjustment
+    soil_adj = 0.0
+    s_lower = (soil_type or "").lower()
+    if "clay" in s_lower or "black" in s_lower:
+        soil_adj = +6.0
+    elif "sand" in s_lower or "red" in s_lower or "rock" in s_lower or "gravel" in s_lower:
+        soil_adj = -4.0
+
+    # 4. Combined Raw Flood Risk
+    flood_score = (elev_risk * 0.70) + (flow_risk * 0.30) + soil_adj
+
+    # 5. Satellite Land-Cover Overrides
+    if land_cover_category in ["Water", "Wetland", "Mangroves"]:
+        flood_score = max(flood_score, 90.0)
+
+    return round(_clip(flood_score, 2.0, 98.0), 1)
+
 async def compute_analysis(land: Land) -> _AnalysisResult:
     lat = land.latitude or 0.0
     lng = land.longitude or 0.0
@@ -270,35 +333,39 @@ async def compute_analysis(land: Land) -> _AnalysisResult:
         'hotels': hotels
     }])
 
-    # 3. Predict
+    # 3. Predict Sub-scores
     preds = reg_risk.predict(x_input)[0]
-    flood_score, env_score, access_score, infra_risk, risk_score, suitability = (round(_clip(p), 1) for p in preds)
+    _, env_score, access_score, infra_risk, _, _ = (round(_clip(p), 1) for p in preds)
+    
+    # Accurate physically-based flood risk from live Open-Meteo elevation and river discharge
+    lc_cat = land_cover_res.category if land_cover_res else None
+    flood_score = compute_hydrological_flood_risk(elevation, discharge, s_val_clean, lc_cat)
     
     # 4. Regional Dataset Penalties & Overrides
     if reg_info:
         cover = reg_info.get('land_cover')
         hist_flood = reg_info.get('historical_floods', 0) or reg_info.get('flood_occurred', 0)
         if cover == 'Water Body':
-            suitability = min(suitability, 15.0)
             flood_score = max(flood_score, 85.0)
-            risk_score = max(risk_score, 80.0)
-        if hist_flood == 1:
-            flood_score = round(_clip(flood_score + 20.0), 1)
-            risk_score = round(_clip(risk_score + 15.0), 1)
+        if hist_flood == 1 and elevation < 80.0:
+            flood_score = round(_clip(flood_score + 15.0), 1)
 
     # 5. ESA WorldCover High-Confidence Ground-Truth Overrides
     if land_cover_res:
         if land_cover_res.construction_suitability == "Unsuitable":
-            suitability = min(suitability, 5.0)
-            risk_score = max(risk_score, 95.0)
             env_score = max(env_score, 95.0)
             if land_cover_res.category in ["Water", "Wetland"]:
                 flood_score = max(flood_score, 90.0)
         elif land_cover_res.construction_suitability == "Caution":
             env_score = round(_clip(env_score + 15.0), 1)
-            risk_score = round(_clip(risk_score + 10.0), 1)
-            suitability = round(_clip(suitability - 10.0), 1)
     
+    # Aggregate Risk Score & Suitability directly from physical components
+    risk_score = round(_clip(flood_score * 0.35 + access_score * 0.25 + infra_risk * 0.25 + env_score * 0.15), 1)
+    suitability = round(_clip(100.0 - risk_score), 1)
+    if land_cover_res and land_cover_res.construction_suitability == "Unsuitable":
+        suitability = min(suitability, 5.0)
+        risk_score = max(risk_score, 95.0)
+
     btype_pred = clf_btype.predict(x_input)[0]
     building_type = le_btype.inverse_transform([btype_pred])[0]
     if land_cover_res and land_cover_res.construction_suitability == "Unsuitable":
