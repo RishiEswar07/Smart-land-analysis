@@ -65,6 +65,9 @@ class FactorScoreItem(BaseModel):
     score: float | None = Field(None, description="Score 0-100, or None if data unavailable")
     impact: str = Field(..., description="Positive, Moderate, Negative, or Data unavailable")
     weight: float | None = None
+    why_reason: str = ""
+    data_source: str = ""
+    data_confidence: str = ""
     description: str = ""
 
 
@@ -89,6 +92,9 @@ class ProvenanceItem(BaseModel):
 class DetailedAnalysisResponse(BaseModel):
     """Complete detailed land analysis response with factors, provenance, quality & breakdown."""
     property_info: dict
+    area_conversions: dict = Field(default_factory=dict)
+    plot_validation: dict = Field(default_factory=dict)
+    construction_cost: dict = Field(default_factory=dict)
     suitability: dict
     factors: list[FactorScoreItem]
     risks: dict
@@ -99,4 +105,5 @@ class DetailedAnalysisResponse(BaseModel):
     recommendation: dict
     disclaimer: str
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, extra="ignore")
+

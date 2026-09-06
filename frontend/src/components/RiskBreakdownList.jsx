@@ -14,26 +14,34 @@ export default function RiskBreakdownList({ breakdown = {} }) {
   const entries = Object.entries(breakdown)
 
   if (entries.length === 0) {
-    return <p className="text-xs text-slate-dim">No risk breakdown available.</p>
+    return <p className="text-xs text-slate-500">No risk breakdown available.</p>
   }
 
   return (
     <div className="space-y-4">
       {entries.map(([key, factor]) => (
-        <div key={key}>
+        <div key={key} className="p-2 rounded-lg bg-slate-50/60 border border-slate-100">
           <div className="flex justify-between items-baseline text-xs mb-1.5">
-            <span className="text-slate font-medium">
+            <span className="text-slate-800 font-bold">
               {factor.label}
-              <span className="text-slate-dim font-normal"> · weight {Math.round(factor.weight * 100)}%</span>
+              {factor.weight && (
+                <span className="text-slate-400 font-normal ml-1">· weight {Math.round(factor.weight * 100)}%</span>
+              )}
             </span>
-            <span className="font-semibold text-ink">{factor.score}%</span>
+            <span className="font-extrabold text-slate-900">{factor.score}%</span>
           </div>
-          <div className="h-2 rounded-full bg-mist overflow-hidden">
+          <div className="h-2 rounded-full bg-slate-200 overflow-hidden">
             <div
               className="h-full rounded-full transition-all"
-              style={{ width: `${factor.score}%`, backgroundColor: barColor(factor.score) }}
+              style={{ width: `${Math.max(4, Math.min(100, factor.score))}%`, backgroundColor: barColor(factor.score) }}
             />
           </div>
+          {(factor.why_reason || factor.description) && (
+            <p className="text-[11px] text-slate-500 mt-1.5 leading-snug">
+              <strong className="text-slate-600 font-semibold">Why: </strong>
+              {factor.why_reason || factor.description}
+            </p>
+          )}
         </div>
       ))}
     </div>

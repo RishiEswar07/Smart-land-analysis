@@ -85,11 +85,25 @@ export const generateEstimatedParcel = (lat, lng, sideLengthMeters = 15) => {
   };
 };
 
+// Centralized Building Requirements and Minimum Plot Sizes
+export const BUILDING_REQUIREMENTS = {
+  'Individual House': { minSqFt: 400, label: 'Individual House', rate: 2000, description: 'Single-family standalone residence' },
+  'Apartment': { minSqFt: 2000, label: 'Apartment', rate: 2200, description: 'Multi-story residential apartment complex' },
+  'Commercial Building': { minSqFt: 1500, label: 'Commercial Building', rate: 2500, description: 'Retail, commercial office or business hub' },
+  'School': { minSqFt: 5000, label: 'School', rate: 2000, description: 'Educational campus with classrooms and grounds' },
+  'Hospital': { minSqFt: 10000, label: 'Hospital', rate: 3000, description: 'Multi-tier healthcare facility with emergency bays' },
+};
+
 /**
- * Accurately calculates the geodesic area in square feet for any set of coordinates.
+ * Accurately calculates geodesic polygon area in square meters, square feet, and cents.
+ * Single source of truth for all area measurements.
  */
-export const calculatePolygonAreaSqFt = (coords) => {
-  if (!coords || coords.length < 3) return 0;
+export const calculateGeodesicArea = (coords) => {
+  if (!coords || coords.length < 3) {
+    return { sqMeters: 0, sqFt: 0, cents: 0 };
+  }
+
+  let sqMeters = 0;
 
   try {
     const formatted = coords.map(c => [c.lng ?? c[0], c.lat ?? c[1]]);
@@ -108,34 +122,103 @@ export const calculatePolygonAreaSqFt = (coords) => {
       }
     };
 
-    const sqMeters = area(geojson);
-    if (!isNaN(sqMeters) && sqMeters > 0) {
-      return Math.round(sqMeters * 10.7639104 * 10) / 10;
-    }
+    sqMeters = area(geojson);
   } catch (err) {
-    console.warn('Turf area calculation fallback:', err);
+    console.warn('Turf area calculation error, using geodesic shoelace fallback:', err);
+    // Geodesic Shoelace Fallback
+    try {
+      const rad = Math.PI / 180;
+      const R = 6378137;
+      let totalArea = 0;
+      const n = coords.length;
+      for (let i = 0; i < n; i++) {
+        const p1 = coords[i];
+        const p2 = coords[(i + 1) % n];
+        const lat1 = (p1.lat ?? p1[1]) * rad;
+        const lat2 = (p2.lat ?? p2[1]) * rad;
+        const lng1 = (p1.lng ?? p1[0]) * rad;
+        const lng2 = (p2.lng ?? p2[0]) * rad;
+        totalArea += (lng2 - lng1) * (2 + Math.sin(lat1) + Math.sin(lat2));
+      }
+      sqMeters = Math.abs((totalArea * (R * R)) / 2.0);
+    } catch (e) {
+      sqMeters = 222.96; // fallback 2400 sqft
+    }
   }
 
-  // Geodesic Shoelace Fallback
-  try {
-    const rad = Math.PI / 180;
-    const R = 6378137;
-    let totalArea = 0;
-    const n = coords.length;
-    for (let i = 0; i < n; i++) {
-      const p1 = coords[i];
-      const p2 = coords[(i + 1) % n];
-      const lat1 = (p1.lat ?? p1[1]) * rad;
-      const lat2 = (p2.lat ?? p2[1]) * rad;
-      const lng1 = (p1.lng ?? p1[0]) * rad;
-      const lng2 = (p2.lng ?? p2[0]) * rad;
-      totalArea += (lng2 - lng1) * (2 + Math.sin(lat1) + Math.sin(lat2));
-    }
-    totalArea = Math.abs((totalArea * (R * R)) / 2.0);
-    return Math.round(totalArea * 10.7639104 * 10) / 10;
-  } catch (e) {
-    return 2400;
+  if (isNaN(sqMeters) || sqMeters <= 0) {
+    sqMeters = 0;
   }
+
+  const sqFt = sqMeters * 10.7639104;
+  const cents = sqFt / 435.6;
+
+  return {
+    sqMeters: Math.round(sqMeters * 10) / 10,
+    sqFt: Math.round(sqFt * 10) / 10,
+    cents: Math.round(cents * 100) / 100
+  };
+};
+
+/**
+ * Validates plot size against target building requirements.
+ */
+export const validatePlotSize = (buildingType, areaSqFt) => {
+  const normType = Object.keys(BUILDING_REQUIREMENTS).find(
+    k => k.toLowerCase() === (buildingType || '').toLowerCase()
+  ) || 'Individual House';
+
+  const req = BUILDING_REQUIREMENTS[normType] || BUILDING_REQUIREMENTS['Individual House'];
+  const minRequired = req.minSqFt;
+  const actual = Number(areaSqFt) || 0;
+  const isValid = actual >= minRequired;
+  const diff = actual - minRequired;
+
+  return {
+    isValid,
+    buildingType: normType,
+    requiredMinSqFt: minRequired,
+    actualSqFt: actual,
+    deficitOrSurplusSqFt: Math.abs(diff),
+    status: isValid ? 'SUITABLE' : 'DEFICIT',
+    message: isValid
+      ? `Plot area (${actual.toLocaleString()} sq.ft) meets or exceeds the minimum required (${minRequired.toLocaleString()} sq.ft) for ${normType}. (+${Math.round(diff).toLocaleString()} sq.ft surplus)`
+      : `Plot area (${actual.toLocaleString()} sq.ft) is below the minimum required (${minRequired.toLocaleString()} sq.ft) for ${normType}. Deficit of ${Math.round(Math.abs(diff)).toLocaleString()} sq.ft.`
+  };
+};
+
+/**
+ * Calculates indicative construction cost with 55% material, 25% labour, and 20% finishing breakdown.
+ */
+export const calculateConstructionCost = (buildingType, areaSqFt, customRate = null) => {
+  const normType = Object.keys(BUILDING_REQUIREMENTS).find(
+    k => k.toLowerCase() === (buildingType || '').toLowerCase()
+  ) || 'Individual House';
+
+  const req = BUILDING_REQUIREMENTS[normType] || BUILDING_REQUIREMENTS['Individual House'];
+  const rate = customRate !== null && Number(customRate) > 0 ? Number(customRate) : req.rate;
+  const area = Math.max(Number(areaSqFt) || 0, 0);
+  const totalCost = Math.round(area * rate);
+
+  return {
+    buildingType: normType,
+    areaSqFt: area,
+    ratePerSqFt: rate,
+    totalEstimatedCost: totalCost,
+    materialCost: Math.round(totalCost * 0.55),
+    labourCost: Math.round(totalCost * 0.25),
+    finishingCost: Math.round(totalCost * 0.20),
+    materialPct: 55,
+    labourPct: 25,
+    finishingPct: 20
+  };
+};
+
+/**
+ * Accurately calculates the geodesic area in square feet for any set of coordinates.
+ */
+export const calculatePolygonAreaSqFt = (coords) => {
+  return calculateGeodesicArea(coords).sqFt;
 };
 
 const gisService = {

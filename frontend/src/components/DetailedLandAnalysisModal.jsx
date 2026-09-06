@@ -22,6 +22,7 @@ export default function DetailedLandAnalysisModal({
   const [error, setError] = useState(null)
   const [exportingType, setExportingType] = useState(null)
   const [exportSuccess, setExportSuccess] = useState(null)
+  const [showFormulaDetails, setShowFormulaDetails] = useState(false)
 
   // Fetch detailed data whenever modal opens
   useEffect(() => {
@@ -65,7 +66,14 @@ export default function DetailedLandAnalysisModal({
   const sources = data?.data_sources || []
   const historical = data?.historical_change || {}
   const rec = data?.recommendation || {}
+  const areaConv = data?.area_conversions || {}
+  const plotVal = data?.plot_validation || {}
+  const cost = data?.construction_cost || {}
   const disclaimer = data?.disclaimer || 'This analysis is a GIS-based decision-support assessment.'
+
+  const areaSqFt = areaConv.sqft ?? prop.area_sqft ?? 0
+  const areaSqm = areaConv.sqm ?? (areaSqFt ? (areaSqFt / 10.7639).toFixed(1) : 0)
+  const areaCents = areaConv.cents ?? (areaSqFt ? (areaSqFt / 435.6).toFixed(2) : 0)
 
   const handleExport = async (format) => {
     if (!analysisId) return
@@ -185,13 +193,16 @@ export default function DetailedLandAnalysisModal({
                 </div>
                 <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
                   <span className="text-slate-400 block text-[10px]">Building Target</span>
-                  <span className="font-semibold text-blue-700">{prop.selected_building_type || 'Residential House'}</span>
+                  <span className="font-semibold text-blue-700">{prop.selected_building_type || 'Individual House'}</span>
                 </div>
                 <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
                   <span className="text-slate-400 block text-[10px]">Parcel Area</span>
-                  <span className="font-semibold text-slate-800">
-                    {prop.area_sqft ? `${Number(prop.area_sqft).toLocaleString()} sq.ft` : 'Data unavailable'}
-                  </span>
+                  <div className="font-semibold text-slate-800">
+                    <div>{Number(areaSqFt).toLocaleString()} sq.ft</div>
+                    <div className="text-[10px] text-slate-500 font-normal">
+                      {Number(areaSqm).toLocaleString()} m² • {Number(areaCents).toFixed(2)} cents
+                    </div>
+                  </div>
                 </div>
                 <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
                   <span className="text-slate-400 block text-[10px]">Road Width</span>
@@ -218,11 +229,87 @@ export default function DetailedLandAnalysisModal({
             </div>
           </div>
 
-          {/* Section 2: Factor Breakdown with Impact Badges */}
+          {/* Section 1.5: Plot Size Validation & Indicative Construction Cost */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Plot Size Validation Card */}
+            <div className={`p-4 rounded-xl border ${plotVal.is_valid !== false ? 'bg-emerald-50/60 border-emerald-200' : 'bg-rose-50/60 border-rose-200'}`}>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                  <span>📐</span> Plot Requirement Validation
+                </span>
+                <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full uppercase tracking-wider border ${
+                  plotVal.is_valid !== false 
+                    ? 'bg-emerald-100 text-emerald-800 border-emerald-300' 
+                    : 'bg-rose-100 text-rose-800 border-rose-300'
+                }`}>
+                  {plotVal.status || (plotVal.is_valid !== false ? 'SUITABLE' : 'DEFICIT')}
+                </span>
+              </div>
+              <div className="text-xs text-slate-700 space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Minimum Required Area:</span>
+                  <span className="font-bold">{Number(plotVal.required_min_sqft || 400).toLocaleString()} sq.ft</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Actual Parcel Area:</span>
+                  <span className="font-bold">{Number(plotVal.actual_sqft || areaSqFt).toLocaleString()} sq.ft</span>
+                </div>
+                <div className="flex justify-between pt-1 border-t border-slate-200/60 font-semibold">
+                  <span className="text-slate-600">Surplus / Deficit:</span>
+                  <span className={plotVal.is_valid !== false ? 'text-emerald-700' : 'text-rose-700'}>
+                    {plotVal.is_valid !== false ? '+' : '-'}{Number(plotVal.deficit_or_surplus_sqft || 0).toLocaleString()} sq.ft
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-600 pt-1 leading-snug">
+                  {plotVal.message || 'Plot area meets minimum regulatory size guidelines.'}
+                </p>
+              </div>
+            </div>
+
+            {/* Indicative Construction Cost Card */}
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                  <span>🏗️</span> Construction Cost Estimator
+                </span>
+                <span className="text-xs font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                  ₹{Number(cost.rate_per_sqft || 2000).toLocaleString()}/sq.ft
+                </span>
+              </div>
+              <div className="text-xs space-y-1.5">
+                <div className="flex justify-between items-baseline">
+                  <span className="text-slate-500">Total Estimated Cost:</span>
+                  <span className="text-base font-black text-slate-900">
+                    ₹{Number(cost.total_estimated_cost || (areaSqFt * 2000)).toLocaleString()}
+                  </span>
+                </div>
+                {/* Cost Breakdown Bars */}
+                <div className="grid grid-cols-3 gap-1.5 text-[10px] pt-1">
+                  <div className="bg-white p-1.5 rounded border border-slate-200">
+                    <span className="text-slate-400 block">Material (55%)</span>
+                    <strong className="text-slate-800">₹{Number(cost.material_cost || (areaSqFt * 2000 * 0.55)).toLocaleString()}</strong>
+                  </div>
+                  <div className="bg-white p-1.5 rounded border border-slate-200">
+                    <span className="text-slate-400 block">Labour (25%)</span>
+                    <strong className="text-slate-800">₹{Number(cost.labour_cost || (areaSqFt * 2000 * 0.25)).toLocaleString()}</strong>
+                  </div>
+                  <div className="bg-white p-1.5 rounded border border-slate-200">
+                    <span className="text-slate-400 block">Finishing (20%)</span>
+                    <strong className="text-slate-800">₹{Number(cost.finishing_cost || (areaSqFt * 2000 * 0.20)).toLocaleString()}</strong>
+                  </div>
+                </div>
+                <p className="text-[10px] text-slate-400 pt-0.5 leading-tight">
+                  *Indicative civil estimate in Indian Rupees (₹).
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Section 2: Factor Breakdown with "Why this score?" physical explanations */}
           <div>
             <div className="flex items-center justify-between mb-3">
               <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                <span>Key Factor Breakdown</span>
+                <span>Key Factor Breakdown & Physical Reasons</span>
                 <span className="text-[11px] font-normal text-slate-500">
                   (Evaluated across 7 real environmental and spatial dimensions)
                 </span>
@@ -243,7 +330,7 @@ export default function DetailedLandAnalysisModal({
                       </span>
                     </div>
 
-                    <div className="flex items-baseline gap-2 my-2">
+                    <div className="flex items-baseline gap-2 my-1.5">
                       <span className="text-2xl font-black text-slate-900">
                         {f.score !== null && f.score !== undefined ? `${f.score}%` : 'N/A'}
                       </span>
@@ -266,7 +353,18 @@ export default function DetailedLandAnalysisModal({
                       </div>
                     )}
 
-                    <p className="text-xs text-slate-500 leading-snug">{f.description}</p>
+                    {/* "Why this score?" Physical Explanation Box */}
+                    <div className="bg-slate-50 p-2 rounded-lg border border-slate-100 text-[11px] text-slate-700 mb-1.5">
+                      <strong className="text-blue-700 block text-[10px] uppercase tracking-wider mb-0.5">Why this score?</strong>
+                      {f.why_reason || f.description}
+                    </div>
+
+                    {f.data_source && (
+                      <div className="text-[10px] text-slate-400 flex justify-between items-center">
+                        <span>Source: {f.data_source}</span>
+                        {f.data_confidence && <span>{f.data_confidence}% conf</span>}
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
@@ -275,13 +373,22 @@ export default function DetailedLandAnalysisModal({
 
           {/* Section 3: Calculation Breakdown & ML Model Transparency */}
           <div className="bg-slate-50 rounded-xl p-5 border border-slate-200">
-            <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
-              Score Calculation & ML Algorithm Transparency
-            </h4>
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                Score Calculation & ML Algorithm Transparency
+              </h4>
+              <button
+                onClick={() => setShowFormulaDetails(!showFormulaDetails)}
+                className="text-xs font-semibold text-blue-600 hover:text-blue-800"
+              >
+                {showFormulaDetails ? 'Hide Details' : 'How was this score calculated?'}
+              </button>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
               <div>
                 <p className="text-slate-600 mb-1.5">
-                  <strong>Pipeline:</strong> {calc.methodology || 'Random Forest Machine Learning Regressor + Hydrological Modeling'}
+                  <strong>Pipeline:</strong> {calc.methodology || 'Hybrid Machine Learning (Random Forest) + Physical Hydrological & Geomorphic Modeling'}
                 </p>
                 <div className="p-3 bg-white rounded-lg border border-slate-200 font-mono text-[11px] text-slate-800">
                   {calc.formula || 'Suitability = 100 - (0.35 × FloodRisk + 0.25 × AccessRisk + 0.25 × InfraRisk + 0.15 × EnvRisk)'}
@@ -289,7 +396,7 @@ export default function DetailedLandAnalysisModal({
               </div>
               <div>
                 <p className="text-slate-600 mb-1.5">
-                  <strong>Feature Contributions:</strong>
+                  <strong>Risk Dimension Weights:</strong>
                 </p>
                 <div className="grid grid-cols-2 gap-2 text-[11px]">
                   <div className="bg-white p-2 rounded border border-slate-200">
@@ -311,6 +418,16 @@ export default function DetailedLandAnalysisModal({
                 </div>
               </div>
             </div>
+
+            {showFormulaDetails && (
+              <div className="mt-4 p-3 bg-white rounded-lg border border-blue-200 text-xs text-slate-700 leading-relaxed space-y-1.5">
+                <p className="font-bold text-blue-900">How the Hybrid AI & Physical Engine works:</p>
+                <p>1. <strong>Physical Hydrology</strong>: Uses Open-Meteo elevation and Copernicus GloFAS river discharge to calculate flood vulnerability.</p>
+                <p>2. <strong>Spatial Connectivity</strong>: Queries OpenStreetMap Overpass for road access corridor width and municipal utility points.</p>
+                <p>3. <strong>Geotechnical Soil & Land Cover</strong>: Queries ISRIC SoilGrids 250m WRB taxonomy and ESA WorldCover 10m satellite classification.</p>
+                <p>4. <strong>Random Forest Ensemble</strong>: Weighs all dimensions against building type requirements to predict feasibility score and risk level.</p>
+              </div>
+            )}
           </div>
 
           {/* Section 4: Scientific Data Quality & Completeness Indicators */}

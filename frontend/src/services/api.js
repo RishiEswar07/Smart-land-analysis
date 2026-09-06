@@ -44,10 +44,21 @@ api.interceptors.request.use((config) => {
 // ---- Response interceptor: normalize errors, handle 401 ----
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
     if (error.response?.status === 401) {
       // Token expired / invalid — clear it so the UI can react
       localStorage.removeItem('access_token')
+    }
+
+    // If response is a Blob (e.g. from failed file download), parse it to extract actual error JSON
+    if (error.response?.data instanceof Blob) {
+      try {
+        const text = await error.response.data.text()
+        const parsed = JSON.parse(text)
+        error.response.data = parsed
+      } catch (e) {
+        // Blob is not JSON or could not be parsed
+      }
     }
 
     const message = extractErrorMessage(error)

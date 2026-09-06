@@ -20,8 +20,9 @@ const STORAGE_KEY = 'smart_land_analysis_active_state';
 const MIN_AREA_REQUIREMENTS = {
   'Hospital': { min: 10000, reason: 'Hospital requires at least 10,000 sq.ft for emergency bays, patient wards, and parking.', rec: 'Commercial Building' },
   'School': { min: 5000, reason: 'School requires at least 5,000 sq.ft for classrooms, safety setbacks, and student assembly grounds.', rec: 'Apartment' },
-  'Apartment': { min: 2000, reason: 'Multi-unit Apartment requires at least 2,000 sq.ft for vertical layout, stairwells, and parking.', rec: 'Residential House' },
-  'Commercial Building': { min: 1500, reason: 'Commercial Building requires at least 1,500 sq.ft for commercial viability and floor access.', rec: 'Residential House' },
+  'Apartment': { min: 2000, reason: 'Multi-unit Apartment requires at least 2,000 sq.ft for vertical layout, stairwells, and parking.', rec: 'Individual House' },
+  'Commercial Building': { min: 1500, reason: 'Commercial Building requires at least 1,500 sq.ft for commercial viability and floor access.', rec: 'Individual House' },
+  'Individual House': { min: 400, reason: 'Individual House requires at least 400 sq.ft to meet standard residential habitability and setback codes.', rec: 'None' },
   'Residential House': { min: 400, reason: 'Residential House requires at least 400 sq.ft to meet standard residential habitability and setback codes.', rec: 'None' }
 };
 
@@ -41,7 +42,7 @@ export default function LandAnalysis() {
     }
   }, []);
 
-  const [selectedBuildingType, setSelectedBuildingType] = useState(savedState?.selectedBuildingType || 'Residential House')
+  const [selectedBuildingType, setSelectedBuildingType] = useState(savedState?.selectedBuildingType || 'Individual House')
   const [clickedLocation, setClickedLocation] = useState(savedState?.clickedLocation || null)
   const [activeBoundary, setActiveBoundary] = useState(savedState?.activeBoundary || null)
   
@@ -322,7 +323,7 @@ export default function LandAnalysis() {
             
             <div className="grid sm:grid-cols-2 gap-4">
               {[
-                { name: 'Residential House', min: '400 sq.ft min', desc: 'Single-family homes & villas' },
+                { name: 'Individual House', min: '400 sq.ft min', desc: 'Single-family standalone residence' },
                 { name: 'Apartment', min: '2,000 sq.ft min', desc: 'Multi-family residential complex' },
                 { name: 'Commercial Building', min: '1,500 sq.ft min', desc: 'Offices, retail, and complexes' },
                 { name: 'School', min: '5,000 sq.ft min', desc: 'Educational institutions & campuses' },
@@ -490,11 +491,14 @@ export default function LandAnalysis() {
                   </p>
                 </div>
                 <div className="text-right">
-                  <span className="text-sm font-black text-blue-600">
+                  <span className="text-sm font-black text-blue-600 block">
                     {Math.round(gisData.area_sqft || manualArea || 2400).toLocaleString()} sq.ft
                   </span>
+                  <span className="text-[11px] text-slate-500 font-medium block">
+                    {Math.round((gisData.area_sqft || manualArea || 2400) / 10.7639).toLocaleString()} m² · {((gisData.area_sqft || manualArea || 2400) / 435.6).toFixed(2)} cents
+                  </span>
                   {gisData.is_estimated && !activeBoundary && (
-                    <span className="block text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full mt-0.5">
+                    <span className="inline-block text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full mt-0.5">
                       Dynamic Bounding Calculation
                     </span>
                   )}
