@@ -29,7 +29,25 @@ async def lifespan(app: FastAPI):
     is waking up or temporarily spinning up (e.g. Supabase cold starts).
     Also ensures all required database tables exist.
     """
+    import os
+    import re
+
     logger.info("Starting %s [%s environment]", settings.APP_NAME, settings.APP_ENV)
+
+    is_cloud = bool(os.environ.get("RENDER")) or settings.APP_ENV == "production"
+    db_url = settings.DATABASE_URL
+
+    if not db_url or "localhost" in db_url or "127.0.0.1" in db_url:
+        if is_cloud:
+            logger.error(
+                "CRITICAL: DATABASE_URL is not configured on Render! "
+                "Cloud containers cannot connect to localhost:5432. "
+                "Please add DATABASE_URL in Render Dashboard -> Environment Variables."
+            )
+
+    # Sanitize DB URL for logging
+    sanitized_url = re.sub(r":([^:@]+)@", ":****@", db_url) if db_url else "UNCONFIGURED"
+    logger.info("Configured Database URL: %s", sanitized_url)
 
     # Verify database connectivity and initialize tables if needed
     try:
@@ -45,10 +63,11 @@ async def lifespan(app: FastAPI):
             await conn.run_sync(Base.metadata.create_all)
         logger.info("Database schema verified / initialized.")
     except Exception as exc:
+        sanitized_exc = re.sub(r":([^:@]+)@", ":****@", str(exc))
         logger.warning(
             "Database connection/initialization warning at startup: %s. "
-            "The server will continue running to handle cold starts.",
-            exc,
+            "If using cloud PostgreSQL, verify host, port, credentials, and SSL settings.",
+            sanitized_exc,
         )
 
     yield
@@ -88,6 +107,7 @@ def create_application() -> FastAPI:
     # ---------------- CORS ----------------
     # Allows Vercel production frontend and local dev environments
     default_origins = [
+        "https://analysis.vercel.app",
         "https://smart-land-analysis.vercel.app",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
@@ -110,6 +130,21 @@ def create_application() -> FastAPI:
         allow_headers=["*"],
         expose_headers=["Content-Disposition", "content-disposition"],
     )
+
+    # ---------------- Global Exception Handler ----------------
+    # Ensures that unhandled errors (e.g. database disconnect) still return proper CORS headers
+    from fastapi import Request
+    from fastapi.responses import JSONResponse
+
+    @app.exception_handler(Exception)
+    async def global_exception_handler(request: Request, exc: Exception):
+        logger.error("Unhandled exception processing %s %s: %s", request.method, request.url, exc, exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "detail": f"Backend server or database error: {str(exc)}" if settings.DEBUG else "Database or backend error. Please check server logs and DATABASE_URL."
+            },
+        )
 
     # ---------------- Routers ----------------
     from app.routers import (
@@ -156,6 +191,46 @@ def create_application() -> FastAPI:
             "status": "ok",
             "message": "Smart Land Analysis API is running",
         }
+
+    @app.get(f"{settings.API_V1_PREFIX}/health/db", tags=["Health"])
+    async def health_db_check():
+        """Database connectivity health check endpoint."""
+        import os
+        import re
+
+        is_cloud = bool(os.environ.get("RENDER")) or settings.APP_ENV == "production"
+        db_url = settings.DATABASE_URL
+
+        if is_cloud and (not db_url or "localhost" in db_url or "127.0.0.1" in db_url):
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "status": "error",
+                    "database": "unconfigured",
+                    "detail": "DATABASE_URL is not configured in Render Environment Variables. Please add a valid cloud PostgreSQL connection string in Render Dashboard.",
+                },
+            )
+
+        try:
+            from app.db.session import engine
+            from sqlalchemy import text
+            async with engine.connect() as conn:
+                await conn.execute(text("SELECT 1"))
+            return {
+                "status": "ok",
+                "database": "connected",
+                "message": "Database connectivity verified successfully.",
+            }
+        except Exception as exc:
+            sanitized_err = re.sub(r":([^:@]+)@", ":****@", str(exc))
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "status": "error",
+                    "database": "disconnected",
+                    "detail": sanitized_err,
+                },
+            )
 
     return app
 
