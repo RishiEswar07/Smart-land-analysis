@@ -15,6 +15,7 @@ from openpyxl.utils import get_column_letter
 
 from app.models.land import Land
 from app.models.analysis import Analysis
+from app.utils.area_units import get_all_area_conversions
 
 
 def generate_land_report_excel(land: Land, analysis: Analysis, details: dict) -> bytes:
@@ -53,17 +54,24 @@ def generate_land_report_excel(land: Land, analysis: Analysis, details: dict) ->
     ws_summary["A4"].font = section_font
 
     area_conv = details.get("area_conversions") or {}
-    area_sqft = area_conv.get("sqft") or (land.area_sqft if land and land.area_sqft else 0.0)
-    area_sqm = area_conv.get("sqm") or (area_sqft / 10.7639 if area_sqft else 0.0)
-    area_cents = area_conv.get("cents") or (area_sqft / 435.6 if area_sqft else 0.0)
+    area_sqft = float(area_conv.get("sqft") or (land.area_sqft if land and land.area_sqft else 1500.0))
+    all_conversions = get_all_area_conversions(area_sqft)
+    area_sqm = float(area_conv.get("sqm") or all_conversions["sqm"])
+    area_cents = float(area_conv.get("cents") or all_conversions["cents"])
+    area_acres = float(area_conv.get("acres") or all_conversions["acres"])
+    
+    area_source = getattr(land, "area_source", "polygon") or details.get("property_info", {}).get("area_source", "polygon")
+    area_source_label = "User-entered Land Area" if area_source == "direct_input" else "Area calculated from selected land boundary"
 
     prop_rows = [
         ("Land Name / Identifier", (land.land_name if land else None) or "Selected Parcel"),
         ("Address / Locality", (land.address if land else None) or "Unknown Address"),
         ("Geographic Coordinates", f"{land.latitude:.6f}, {land.longitude:.6f}" if land and land.latitude is not None and land.longitude is not None else "N/A"),
-        ("Parcel Area (Sq.Ft)", f"{area_sqft:,.1f} sq.ft"),
-        ("Parcel Area (Sq.Meters)", f"{area_sqm:,.1f} m²"),
-        ("Parcel Area (Cents)", f"{area_cents:,.2f} cents"),
+        ("Area Measurement Source", area_source_label),
+        ("Parcel Area (Sq.Ft)", f"{area_sqft:,.2f} sq.ft"),
+        ("Parcel Area (Sq.Meters)", f"{area_sqm:,.2f} m²"),
+        ("Parcel Area (Cents)", f"{area_cents:,.4f} cents"),
+        ("Parcel Area (Acres)", f"{area_acres:,.4f} acres"),
         ("Road Access Width", f"{land.road_width:.0f} ft" if land and land.road_width else "20 ft"),
         ("Soil Taxonomy", land.soil_type.value if land and hasattr(land, 'soil_type') and land.soil_type else "Loamy"),
         ("Zoning / Land Type", land.land_type.value if land and hasattr(land, 'land_type') and land.land_type else "Residential"),
@@ -90,9 +98,9 @@ def generate_land_report_excel(land: Land, analysis: Analysis, details: dict) ->
 
     val_rows = [
         ("Target Building Type", plot_val.get("building_type", analysis.recommended_building_type if analysis else "Individual House")),
-        ("Minimum Required Area", f"{plot_val.get('required_min_sqft', 0):,.0f} sq.ft"),
+        ("Minimum Required Area", f"{plot_val.get('min_required_sqft', plot_val.get('required_min_sqft', 0)):,.0f} sq.ft"),
         ("Actual Parcel Area", f"{plot_val.get('actual_sqft', area_sqft):,.1f} sq.ft"),
-        ("Status & Viability", "SUITABLE (Meets Requirement)" if plot_val.get("is_valid", True) else "DEFICIT (Below Requirement)"),
+        ("Status & Viability", "SUITABLE (Meets Requirement)" if plot_val.get("is_sufficient", True) else "DEFICIT (Below Requirement)"),
         ("Validation Message", plot_val.get("message", "Plot size is adequate for proposed construction.")),
     ]
 
@@ -106,7 +114,7 @@ def generate_land_report_excel(land: Land, analysis: Analysis, details: dict) ->
         ws_summary[f"B{idx}"] = val
         ws_summary[f"B{idx}"].font = bold_font if "Status" in label else regular_font
         if "Status" in label:
-            ws_summary[f"B{idx}"].fill = accent_green_fill if plot_val.get("is_valid", True) else accent_red_fill
+            ws_summary[f"B{idx}"].fill = accent_green_fill if plot_val.get("is_sufficient", True) else accent_red_fill
         ws_summary[f"B{idx}"].border = border
 
     start_r = val_r + len(val_rows) + 2
@@ -218,11 +226,11 @@ def generate_land_report_excel(land: Land, analysis: Analysis, details: dict) ->
     cost_rows = [
         ("Target Building Type", cost_info.get("building_type", analysis.recommended_building_type if analysis else "Individual House")),
         ("Estimated Area Basis", f"{cost_info.get('area_sqft', area_sqft):,.1f} sq.ft"),
-        ("Baseline Rate per Sq.Ft", f"₹{cost_info.get('rate_per_sqft', 2000):,.0f} / sq.ft"),
-        ("Total Estimated Cost", f"₹{cost_info.get('total_estimated_cost', 0):,.0f}"),
-        ("Material Component (55%)", f"₹{cost_info.get('material_cost', 0):,.0f}"),
-        ("Labour Component (25%)", f"₹{cost_info.get('labour_cost', 0):,.0f}"),
-        ("Finishing & Contingency (20%)", f"₹{cost_info.get('finishing_cost', 0):,.0f}"),
+        ("Baseline Rate per Sq.Ft", f"₹{cost_info.get('rate_per_sqft', cost_info.get('rate_per_sqft_inr', 2000)):,.0f} / sq.ft"),
+        ("Total Estimated Cost", f"₹{cost_info.get('total_estimated_cost', cost_info.get('total_estimated_cost_inr', 0)):,.0f}"),
+        ("Material Component (55%)", f"₹{cost_info.get('material_cost', cost_info.get('material_cost_inr', 0)):,.0f}"),
+        ("Labour Component (25%)", f"₹{cost_info.get('labour_cost', cost_info.get('labour_cost_inr', 0)):,.0f}"),
+        ("Finishing & Contingency (20%)", f"₹{cost_info.get('finishing_cost', cost_info.get('finishing_cost_inr', 0)):,.0f}"),
     ]
 
     for idx, (label, val) in enumerate(cost_rows, start=4):

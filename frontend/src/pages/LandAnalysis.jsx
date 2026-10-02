@@ -14,6 +14,14 @@ import landService from '../services/landService'
 import analysisService from '../services/analysisService'
 import geocodeService from '../services/geocodeService'
 import gisService, { normalizeSoilType, calculatePolygonAreaSqFt, generateEstimatedParcel } from '../services/gisService'
+import {
+  INPUT_UNITS,
+  convertAreaToSqFt,
+  getAllAreaConversions,
+  validatePlotFeasibility,
+  calculateConstructionCost,
+  BUILDING_REQUIREMENTS,
+} from '../utils/areaUnits'
 
 const STORAGE_KEY = 'smart_land_analysis_active_state';
 
@@ -30,7 +38,6 @@ export default function LandAnalysis() {
   const { position: defaultCenter } = useGeolocation()
 
   const [searchTarget, setSearchTarget] = useState(null)
-  const [drawModeOnSelect, setDrawModeOnSelect] = useState(false)
   
   // Selection States with sessionStorage restoration
   const savedState = useMemo(() => {
@@ -46,12 +53,20 @@ export default function LandAnalysis() {
   const [clickedLocation, setClickedLocation] = useState(savedState?.clickedLocation || null)
   const [activeBoundary, setActiveBoundary] = useState(savedState?.activeBoundary || null)
   
+  // Area Input Mode: 'direct' or 'polygon'
+  const [areaInputMode, setAreaInputMode] = useState(savedState?.areaInputMode || 'direct')
+  const [directAreaValue, setDirectAreaValue] = useState(savedState?.directAreaValue || '2400')
+  const [directAreaUnit, setDirectAreaUnit] = useState(savedState?.directAreaUnit || 'sq.ft')
+
   // Workflow Steps: type -> select -> fetching -> summary -> result
   const [step, setStep] = useState(savedState?.step || 'type') 
   
   const [gisData, setGisData] = useState(savedState?.gisData || {
     address: null,
     area_sqft: null,
+    area: null,
+    input_unit: 'sq.ft',
+    area_source: 'direct_input',
     soil_type: null,
     land_cover: null,
     road_width: null,
@@ -66,10 +81,32 @@ export default function LandAnalysis() {
   const [result, setResult] = useState(savedState?.result || null)
   const [showDetailedModal, setShowDetailedModal] = useState(false)
 
-  // Fallback for missing area
+  // Fallback for missing area in summary
   const [manualArea, setManualArea] = useState(savedState?.manualArea || '')
-
   const [showManualDraw, setShowManualDraw] = useState(false)
+
+  // Live conversions for direct area input
+  const liveConversions = useMemo(() => {
+    if (areaInputMode === 'direct') {
+      const rawVal = parseFloat(directAreaValue);
+      if (!isNaN(rawVal) && rawVal > 0) {
+        const sqft = convertAreaToSqFt(rawVal, directAreaUnit);
+        return getAllAreaConversions(sqft);
+      }
+    } else if (activeBoundary?.areaSqFt) {
+      return getAllAreaConversions(activeBoundary.areaSqFt);
+    }
+    return getAllAreaConversions(2400);
+  }, [areaInputMode, directAreaValue, directAreaUnit, activeBoundary]);
+
+  // Current calculated sq.ft value
+  const currentCalculatedSqFt = useMemo(() => {
+    if (areaInputMode === 'direct') {
+      const rawVal = parseFloat(directAreaValue);
+      return !isNaN(rawVal) && rawVal > 0 ? convertAreaToSqFt(rawVal, directAreaUnit) : 0;
+    }
+    return activeBoundary?.areaSqFt || 0;
+  }, [areaInputMode, directAreaValue, directAreaUnit, activeBoundary]);
 
   // Sync state to sessionStorage whenever key properties change
   useEffect(() => {
@@ -79,6 +116,9 @@ export default function LandAnalysis() {
         selectedBuildingType,
         clickedLocation,
         activeBoundary,
+        areaInputMode,
+        directAreaValue,
+        directAreaUnit,
         gisData,
         manualArea,
         result
@@ -87,11 +127,13 @@ export default function LandAnalysis() {
     } catch (e) {
       console.warn("Failed to persist analysis state:", e);
     }
-  }, [step, selectedBuildingType, clickedLocation, activeBoundary, gisData, manualArea, result]);
+  }, [step, selectedBuildingType, clickedLocation, activeBoundary, areaInputMode, directAreaValue, directAreaUnit, gisData, manualArea, result]);
 
   const handleMapClick = (loc) => {
     setClickedLocation(loc)
-    setActiveBoundary(null)
+    if (areaInputMode === 'direct') {
+      setActiveBoundary(null)
+    }
     setError(null)
   }
 
@@ -103,9 +145,11 @@ export default function LandAnalysis() {
       setGisData(prev => ({
         ...prev,
         area_sqft: boundary.areaSqFt,
+        area: boundary.areaSqFt,
+        input_unit: 'sq.ft',
+        area_source: 'polygon',
         boundary_geojson: boundary.geojson,
         is_estimated: false,
-        area_source: 'Drawn Boundary'
       }))
     } else if (!boundary) {
       setActiveBoundary(null)
@@ -113,7 +157,19 @@ export default function LandAnalysis() {
   }
 
   const fetchRealLandData = async () => {
-    if (!clickedLocation && !activeBoundary) return
+    if (!clickedLocation && !activeBoundary) {
+      setError("Please select a location on the map.");
+      return;
+    }
+
+    if (areaInputMode === 'direct') {
+      const rawVal = parseFloat(directAreaValue);
+      if (isNaN(rawVal) || rawVal <= 0) {
+        setError("Please enter a valid positive land area greater than 0.");
+        return;
+      }
+    }
+
     setStep('fetching')
     setFetching(true)
     setError(null)
@@ -123,41 +179,50 @@ export default function LandAnalysis() {
 
     try {
       // Run concurrent GIS queries
-      const [address, parcel, infra, soil, landCover] = await Promise.all([
+      const [address, infra, soil, landCover] = await Promise.all([
         geocodeService.reverseGeocode(lat, lng).catch(() => 'Data Not Available'),
-        !activeBoundary
-          ? gisService.fetchParcelData(lat, lng)
-          : Promise.resolve({
-              available: true,
-              isEstimated: false,
-              areaSqFt: activeBoundary.areaSqFt,
-              geojson: activeBoundary.geojson,
-              source: 'Drawn Boundary'
-            }),
         gisService.fetchInfrastructure(lat, lng),
         gisService.fetchSoilType(lat, lng),
         gisService.fetchLandCover(lat, lng).catch(() => ({ available: false }))
       ]);
 
-      // Calculate initial area with fallback
-      let initialArea = 2400;
-      if (parcel?.areaSqFt && !isNaN(parcel.areaSqFt) && parcel.areaSqFt > 0) {
-        initialArea = Math.round(parcel.areaSqFt);
-      } else if (activeBoundary?.areaSqFt && activeBoundary.areaSqFt > 0) {
-        initialArea = Math.round(activeBoundary.areaSqFt);
+      let finalSqFt = 2400;
+      let rawArea = 2400;
+      let inputUnit = 'sq.ft';
+      let areaSource = 'direct_input';
+      let boundaryGeoJson = null;
+
+      if (areaInputMode === 'direct') {
+        rawArea = parseFloat(directAreaValue) || 2400;
+        inputUnit = directAreaUnit || 'sq.ft';
+        finalSqFt = convertAreaToSqFt(rawArea, inputUnit);
+        areaSource = 'direct_input';
+        boundaryGeoJson = null; // No fake polygon for direct input
       } else {
-        const est = generateEstimatedParcel(lat, lng, 15);
-        initialArea = Math.round(est.areaSqFt);
+        if (activeBoundary?.areaSqFt && activeBoundary.areaSqFt > 0) {
+          finalSqFt = Math.round(activeBoundary.areaSqFt);
+          boundaryGeoJson = activeBoundary.geojson;
+        } else {
+          // If polygon mode was selected but user only clicked a point, compute estimated parcel
+          const parcel = await gisService.fetchParcelData(lat, lng);
+          finalSqFt = Math.round(parcel.areaSqFt);
+          boundaryGeoJson = parcel.geojson;
+        }
+        rawArea = finalSqFt;
+        inputUnit = 'sq.ft';
+        areaSource = 'polygon';
       }
 
-      setManualArea(String(initialArea));
+      setManualArea(String(finalSqFt));
 
       setGisData({
         address: address !== 'Data Not Available' ? address : null,
-        area_sqft: initialArea,
-        boundary_geojson: parcel?.geojson || activeBoundary?.geojson || null,
-        is_estimated: Boolean(parcel?.isEstimated),
-        area_source: parcel?.source || (activeBoundary ? 'Drawn Boundary' : 'OpenStreetMap / Overpass'),
+        area_sqft: finalSqFt,
+        area: rawArea,
+        input_unit: inputUnit,
+        area_source: areaSource,
+        boundary_geojson: boundaryGeoJson,
+        is_estimated: areaInputMode === 'direct',
         road_width: infra.available ? infra.roadWidth : 20,
         water_availability: infra.available ? infra.water : true,
         electricity_availability: infra.available ? infra.electricity : true,
@@ -177,21 +242,21 @@ export default function LandAnalysis() {
   }
 
   const handleAnalyze = async () => {
-    let finalArea = null;
-    if (gisData.area_sqft && !isNaN(Number(gisData.area_sqft)) && Number(gisData.area_sqft) > 0) {
-      finalArea = Number(gisData.area_sqft);
-    } else if (manualArea) {
-      const parsed = parseFloat(String(manualArea).replace(/,/g, '').trim());
-      if (!isNaN(parsed) && parsed > 0) {
-        finalArea = parsed;
-      }
-    } else if (activeBoundary?.areaSqFt) {
-      finalArea = Number(activeBoundary.areaSqFt);
-    }
+    let finalSqFt = gisData.area_sqft;
+    let rawArea = gisData.area;
+    let inputUnit = gisData.input_unit || 'sq.ft';
+    let areaSource = gisData.area_source || (areaInputMode === 'direct' ? 'direct_input' : 'polygon');
+    let boundaryGeoJson = gisData.boundary_geojson;
 
-    if (!finalArea || finalArea <= 0) {
-      finalArea = 2400;
-      setManualArea('2400');
+    if (!finalSqFt || isNaN(Number(finalSqFt)) || Number(finalSqFt) <= 0) {
+      if (manualArea) {
+        finalSqFt = parseFloat(String(manualArea).replace(/,/g, '').trim()) || 2400;
+        rawArea = finalSqFt;
+        inputUnit = 'sq.ft';
+      } else {
+        finalSqFt = 2400;
+        rawArea = 2400;
+      }
     }
 
     setSubmitting(true)
@@ -202,13 +267,16 @@ export default function LandAnalysis() {
         latitude: gisData.lat || (clickedLocation?.lat ?? 0),
         longitude: gisData.lng || (clickedLocation?.lng ?? 0),
         address: gisData.address || "Unknown Address",
-        area_sqft: finalArea,
+        area: rawArea,
+        input_unit: inputUnit,
+        area_source: areaSource,
+        area_sqft: finalSqFt,
         road_width: gisData.road_width || 20,
         soil_type: normalizeSoilType(gisData.soil_type),
         land_type: "Residential",
         water_availability: gisData.water_availability !== null ? gisData.water_availability : true,
         electricity_availability: gisData.electricity_availability !== null ? gisData.electricity_availability : true,
-        boundary_geojson: gisData.boundary_geojson || activeBoundary?.geojson || null,
+        boundary_geojson: boundaryGeoJson,
       })
 
       const analysis = await analysisService.predict(land.id)
@@ -234,12 +302,15 @@ export default function LandAnalysis() {
     setResult(null)
     setError(null)
     setManualArea('')
+    setDirectAreaValue('2400')
+    setDirectAreaUnit('sq.ft')
+    setAreaInputMode('direct')
     setStep('type')
   }
 
   // Size Validation & Recommendations
   const sizeValidation = useMemo(() => {
-    const currentArea = gisData.area_sqft || (manualArea ? parseFloat(manualArea) : 0) || (activeBoundary?.areaSqFt) || 0;
+    const currentArea = currentCalculatedSqFt || gisData.area_sqft || (manualArea ? parseFloat(manualArea) : 0) || 0;
     const req = MIN_AREA_REQUIREMENTS[selectedBuildingType];
     
     if (!req || !currentArea) {
@@ -262,7 +333,7 @@ export default function LandAnalysis() {
       currentArea: Math.round(currentArea),
       minRequired: req.min
     };
-  }, [gisData.area_sqft, manualArea, activeBoundary, selectedBuildingType]);
+  }, [currentCalculatedSqFt, gisData.area_sqft, manualArea, selectedBuildingType]);
 
   // Overall Feasibility Logic
   const feasibility = useMemo(() => {
@@ -349,35 +420,56 @@ export default function LandAnalysis() {
               className="w-full mt-6 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition-colors shadow-sm"
               onClick={() => setStep('select')}
             >
-              Next: Select Location on Map →
+              Next: Select Location & Land Size →
             </button>
           </div>
         </div>
       )}
 
-      {/* ---------------- STEP 1: CLICK TO SELECT / DRAW ---------------- */}
+      {/* ---------------- STEP 1: SELECT LOCATION / DIRECT AREA / DRAW ---------------- */}
       {step === 'select' && (
-        <div className="grid lg:grid-cols-[1fr_320px] gap-6">
+        <div className="grid lg:grid-cols-[1fr_360px] gap-6">
           <div>
+            {/* Search and Top Bar */}
             <div className="mb-3 flex flex-wrap gap-2 justify-between items-center">
               <div className="flex-1 min-w-[240px] mr-2">
                 <LocationSearch onSelect={setSearchTarget} />
               </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setDrawModeOnSelect(!drawModeOnSelect)}
-                  className={`text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors ${
-                    drawModeOnSelect ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                  }`}
-                >
-                  {drawModeOnSelect ? '✓ Drawing Mode Active' : '✏️ Draw Polygon'}
-                </button>
-                <div className="text-xs font-semibold text-blue-700 bg-blue-100 px-3 py-1.5 rounded-full whitespace-nowrap">
-                  Type: {selectedBuildingType}
-                </div>
+              <div className="text-xs font-semibold text-blue-700 bg-blue-100 px-3 py-1.5 rounded-full whitespace-nowrap">
+                Type: {selectedBuildingType}
               </div>
             </div>
 
+            {/* Mode Selector Tab: Direct Area Input vs Draw Boundary */}
+            <div className="mb-3 bg-slate-100 p-1 rounded-xl flex border border-slate-200 shadow-inner">
+              <button
+                type="button"
+                onClick={() => {
+                  setAreaInputMode('direct');
+                  setActiveBoundary(null);
+                }}
+                className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                  areaInputMode === 'direct'
+                    ? 'bg-white text-blue-700 shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <span>🔢 Enter Land Area Directly</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setAreaInputMode('polygon')}
+                className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                  areaInputMode === 'polygon'
+                    ? 'bg-white text-blue-700 shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <span>✏️ Draw Boundary on Map</span>
+              </button>
+            </div>
+
+            {/* Map Component */}
             <MapPicker
               center={defaultCenter}
               onLocationSelect={handleMapClick}
@@ -385,39 +477,118 @@ export default function LandAnalysis() {
               activeBoundary={activeBoundary}
               onPolygonChange={handleManualBoundary}
               flyToCenter={searchTarget}
-              drawable={drawModeOnSelect}
-              height="600px"
+              drawable={areaInputMode === 'polygon'}
+              height="580px"
             />
           </div>
 
+          {/* Right Panel: Direct Area Form or Boundary Info */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 h-fit flex flex-col gap-4">
             <div>
-              <h3 className="font-bold text-slate-800 text-sm mb-1">Location & Boundary</h3>
+              <h3 className="font-bold text-slate-800 text-sm mb-1">
+                {areaInputMode === 'direct' ? '1. Enter Land Area Directly' : '1. Draw Boundary on Map'}
+              </h3>
               <p className="text-xs text-slate-500">
-                {drawModeOnSelect 
-                  ? 'Click 3 or more points on the map to enclose the parcel boundary, then click Finish Shape.' 
-                  : 'Click anywhere on the land parcel to pinpoint the site and extract GIS data.'}
+                {areaInputMode === 'direct'
+                  ? 'Click your land location on the map, then enter the numeric size and measurement unit below.'
+                  : 'Click 3 or more points on the map to enclose the parcel boundary, then click Finish Shape.'}
               </p>
             </div>
-            
-            {activeBoundary && activeBoundary.areaSqFt ? (
-              <div className="rounded-lg bg-blue-50 px-4 py-3 border border-blue-200">
-                <p className="text-xs font-semibold text-blue-700 mb-1">📐 Custom Polygon Drawn</p>
-                <p className="text-blue-900 text-sm font-black">
-                  {Math.round(activeBoundary.areaSqFt).toLocaleString()} sq.ft
-                </p>
-                <p className="text-blue-600 text-[11px] mt-0.5 font-mono">
-                  {activeBoundary.centroid?.lat?.toFixed(5)}, {activeBoundary.centroid?.lng?.toFixed(5)}
-                </p>
-              </div>
-            ) : clickedLocation ? (
-              <div className="rounded-lg bg-green-50 px-4 py-3 border border-green-200">
-                <p className="text-xs font-semibold text-green-700 mb-1">📍 Point Selected</p>
-                <p className="text-green-800 text-xs mt-1 font-mono">{clickedLocation.lat.toFixed(5)}, {clickedLocation.lng.toFixed(5)}</p>
+
+            {/* DIRECT AREA INPUT FORM */}
+            {areaInputMode === 'direct' ? (
+              <div className="space-y-3">
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="col-span-2">
+                    <label className="text-xs font-bold text-slate-700 mb-1 block">
+                      Land Area <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="number"
+                      min="0.01"
+                      step="any"
+                      value={directAreaValue}
+                      onChange={(e) => setDirectAreaValue(e.target.value)}
+                      placeholder="e.g. 2400"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 mb-1 block">Unit</label>
+                    <select
+                      value={directAreaUnit}
+                      onChange={(e) => setDirectAreaUnit(e.target.value)}
+                      className="w-full px-2 py-2 border border-slate-300 rounded-lg text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                    >
+                      {INPUT_UNITS.map((u) => (
+                        <option key={u.value} value={u.value}>
+                          {u.value}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* 4-UNIT CONVERSION PREVIEW CARD */}
+                <div className="rounded-lg bg-blue-50/70 p-3 border border-blue-200/80 text-xs">
+                  <span className="font-bold text-blue-900 block mb-1 text-[11px] uppercase tracking-wider">
+                    🔄 Live Unit Conversions
+                  </span>
+                  <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-700">
+                    <div className="bg-white p-2 rounded border border-blue-100 shadow-2xs">
+                      <span className="text-slate-400 block text-[10px]">Square Feet</span>
+                      <strong className="text-blue-700 text-xs">{liveConversions.sqft.toLocaleString()} sq.ft</strong>
+                    </div>
+                    <div className="bg-white p-2 rounded border border-blue-100 shadow-2xs">
+                      <span className="text-slate-400 block text-[10px]">Square Meters</span>
+                      <strong className="text-slate-800 text-xs">{liveConversions.sqm.toLocaleString()} m²</strong>
+                    </div>
+                    <div className="bg-white p-2 rounded border border-blue-100 shadow-2xs">
+                      <span className="text-slate-400 block text-[10px]">Cents</span>
+                      <strong className="text-slate-800 text-xs">{liveConversions.cents} cents</strong>
+                    </div>
+                    <div className="bg-white p-2 rounded border border-blue-100 shadow-2xs">
+                      <span className="text-slate-400 block text-[10px]">Acres</span>
+                      <strong className="text-slate-800 text-xs">{liveConversions.acres} acres</strong>
+                    </div>
+                  </div>
+                </div>
+
+                {/* INFORMATIONAL NOTE */}
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-[11px] text-slate-600 leading-snug">
+                  <span className="font-semibold text-slate-700">ℹ️ Note:</span> When entering area directly, GIS and flood analysis are evaluated based on the representative location point on the map, rather than an exact polygon boundary.
+                </div>
               </div>
             ) : (
-              <div className="rounded-lg bg-slate-50 px-4 py-3 border border-slate-200">
-                <p className="text-xs text-slate-500">No location or boundary selected yet.</p>
+              /* POLYGON BOUNDARY SUMMARY */
+              <div>
+                {activeBoundary && activeBoundary.areaSqFt ? (
+                  <div className="rounded-lg bg-blue-50 px-4 py-3 border border-blue-200">
+                    <p className="text-xs font-semibold text-blue-700 mb-1">📐 Custom Polygon Drawn</p>
+                    <p className="text-blue-900 text-sm font-black">
+                      {Math.round(activeBoundary.areaSqFt).toLocaleString()} sq.ft
+                    </p>
+                    <p className="text-blue-600 text-[11px] mt-0.5 font-mono">
+                      {activeBoundary.centroid?.lat?.toFixed(5)}, {activeBoundary.centroid?.lng?.toFixed(5)}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="rounded-lg bg-slate-50 px-4 py-3 border border-slate-200 text-xs text-slate-500">
+                    Click the polygon points on the map to calculate exact geodesic area.
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* SELECTED POINT BADGE */}
+            {clickedLocation ? (
+              <div className="rounded-lg bg-green-50 px-3.5 py-2.5 border border-green-200 text-xs">
+                <p className="font-semibold text-green-800 mb-0.5">📍 Representative Location Point</p>
+                <p className="text-green-700 font-mono text-[11px]">{clickedLocation.lat.toFixed(5)}, {clickedLocation.lng.toFixed(5)}</p>
+              </div>
+            ) : (
+              <div className="rounded-lg bg-amber-50 px-3.5 py-2.5 border border-amber-200 text-xs text-amber-800">
+                ⚠️ Please click on the map to select the land location.
               </div>
             )}
 
@@ -428,7 +599,7 @@ export default function LandAnalysis() {
                   <span>⚠️ Area Warning</span>
                 </div>
                 <p className="leading-snug">
-                  Selected area (<strong>{sizeValidation.currentArea.toLocaleString()} sq.ft</strong>) is smaller than the minimum <strong>{sizeValidation.minRequired.toLocaleString()} sq.ft</strong> required for a <strong>{selectedBuildingType}</strong>.
+                  Entered area (<strong>{sizeValidation.currentArea.toLocaleString()} sq.ft</strong>) is smaller than the minimum <strong>{sizeValidation.minRequired.toLocaleString()} sq.ft</strong> required for a <strong>{selectedBuildingType}</strong>.
                 </p>
                 {sizeValidation.rec && sizeValidation.rec !== 'None' && (
                   <p className="mt-1 text-amber-700 font-medium">
@@ -438,7 +609,7 @@ export default function LandAnalysis() {
               </div>
             )}
 
-            {error && <p className="text-xs text-red-600">{error}</p>}
+            {error && <p className="text-xs text-rose-600 bg-rose-50 p-2.5 rounded border border-rose-200">{error}</p>}
 
             <div className="flex gap-2 pt-2 border-t border-slate-100">
               <button 
@@ -485,9 +656,9 @@ export default function LandAnalysis() {
 
               <div className="flex justify-between items-center py-3 border-b border-slate-100">
                 <div>
-                  <p className="text-sm font-bold text-slate-700">Parcel Area</p>
+                  <p className="text-sm font-bold text-slate-700">Parcel Area & Provenance</p>
                   <p className="text-[10px] text-slate-400">
-                    Source: {gisData.area_source || (activeBoundary ? 'Drawn Boundary' : 'OpenStreetMap / Overpass')}
+                    Source: {gisData.area_source === 'direct_input' ? 'User-entered Land Area' : 'Selected Land Boundary'}
                   </p>
                 </div>
                 <div className="text-right">
@@ -495,13 +666,11 @@ export default function LandAnalysis() {
                     {Math.round(gisData.area_sqft || manualArea || 2400).toLocaleString()} sq.ft
                   </span>
                   <span className="text-[11px] text-slate-500 font-medium block">
-                    {Math.round((gisData.area_sqft || manualArea || 2400) / 10.7639).toLocaleString()} m² · {((gisData.area_sqft || manualArea || 2400) / 435.6).toFixed(2)} cents
+                    {((gisData.area_sqft || 2400) / 10.7639).toFixed(1)} m² · {((gisData.area_sqft || 2400) / 435.6).toFixed(2)} cents · {((gisData.area_sqft || 2400) / 43560).toFixed(4)} acres
                   </span>
-                  {gisData.is_estimated && !activeBoundary && (
-                    <span className="inline-block text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full mt-0.5">
-                      Dynamic Bounding Calculation
-                    </span>
-                  )}
+                  <span className="inline-block text-[10px] font-semibold text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-full mt-0.5">
+                    {gisData.area_source === 'direct_input' ? `Direct Input (${gisData.area || gisData.area_sqft} ${gisData.input_unit || 'sq.ft'})` : 'Polygon Boundary'}
+                  </span>
                 </div>
               </div>
 
@@ -564,14 +733,14 @@ export default function LandAnalysis() {
             {/* OPTIONAL CUSTOMIZATION / ADJUSTMENT */}
             <div className="mt-6 bg-slate-50 border border-slate-200 rounded-xl p-5">
               <div className="flex items-center justify-between mb-2">
-                <p className="text-sm font-bold text-slate-800">Customize Area / Draw Custom Boundary</p>
-                <span className="text-xs text-slate-500 font-medium">Computed: {Math.round(gisData.area_sqft || manualArea || 0).toLocaleString()} sq.ft</span>
+                <p className="text-sm font-bold text-slate-800">Customize Area / Switch to Map Drawing</p>
+                <span className="text-xs text-slate-500 font-medium">Current: {Math.round(gisData.area_sqft || manualArea || 0).toLocaleString()} sq.ft</span>
               </div>
               <p className="text-xs text-slate-500 mb-4">You can adjust the area in sq.ft below or draw a custom boundary directly on the map:</p>
               
               <div className="flex flex-col sm:flex-row gap-4">
                 <div className="flex-1">
-                  <label className="text-xs font-bold text-slate-700 mb-1 block">Custom area (sq.ft)</label>
+                  <label className="text-xs font-bold text-slate-700 mb-1 block">Adjust area (sq.ft)</label>
                   <input 
                     type="number" 
                     value={manualArea}
@@ -580,7 +749,7 @@ export default function LandAnalysis() {
                       setManualArea(val);
                       const parsed = parseFloat(val);
                       if (!isNaN(parsed) && parsed > 0) {
-                        setGisData(prev => ({ ...prev, area_sqft: parsed, is_estimated: false, area_source: 'Manual Custom Area' }));
+                        setGisData(prev => ({ ...prev, area_sqft: parsed, area: parsed, input_unit: 'sq.ft', is_estimated: false }));
                       }
                     }}
                     className="w-full px-3 py-2 border border-slate-300 rounded focus:border-blue-500 text-sm font-medium bg-white"
@@ -680,7 +849,7 @@ export default function LandAnalysis() {
               className="w-full px-4 py-2 border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 transition-colors" 
               onClick={() => setStep('select')}
             >
-              Change Location / Boundary
+              Change Location / Area
             </button>
           </div>
         </div>
@@ -816,4 +985,3 @@ export default function LandAnalysis() {
     </div>
   )
 }
-

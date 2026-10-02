@@ -67,15 +67,20 @@ class Land(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     address: Mapped[str] = mapped_column(String(255), nullable=False)
 
+    # Standardized calculated area in sq.ft used for all analytics & models
     area_sqft: Mapped[float | None] = mapped_column(Float, nullable=True)
+    
+    # Direct area input & provenance fields
+    area: Mapped[float | None] = mapped_column(Float, nullable=True)
+    input_unit: Mapped[str | None] = mapped_column(String(20), nullable=True, default="sq.ft")
+    area_source: Mapped[str | None] = mapped_column(String(30), nullable=True, default="polygon")
+
     road_width: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     # Full drawn polygon boundary, stored as a standard GeoJSON Polygon
     # geometry: {"type": "Polygon", "coordinates": [[[lng, lat], ...]]}.
     # Nullable so older rows (created via marker-only selection, before
-    # polygon drawing existed) remain valid. latitude/longitude above
-    # stay as the quick-access representative point (the polygon's
-    # centroid); this column is the full shape for map redraws/PDF use.
+    # polygon drawing existed) or direct-area-input rows remain valid.
     boundary_geojson: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     soil_type: Mapped[SoilType | None] = mapped_column(
@@ -87,10 +92,9 @@ class Land(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         nullable=False,
     )
 
-    # Added: required by the AI suitability engine (infrastructure scoring)
-    # and by the frontend's land-details form.
+    # Required by the AI suitability engine and land-details form
     water_availability: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=None)
     electricity_availability: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=None)
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid only
-        return f"<Land id={self.id} name={self.land_name!r} type={self.land_type}>"
+        return f"<Land id={self.id} name={self.land_name!r} type={self.land_type} area_sqft={self.area_sqft}>"

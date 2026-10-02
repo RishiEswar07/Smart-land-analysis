@@ -27,6 +27,7 @@ from reportlab.platypus import (
 
 from app.models.analysis import Analysis
 from app.models.land import Land
+from app.utils.area_units import get_all_area_conversions
 
 _BRAND_BLUE = colors.HexColor("#2563EB")
 _BRAND_GREEN = colors.HexColor("#16A34A")
@@ -45,7 +46,7 @@ def _risk_color_hex(level: str) -> str:
 
 
 def generate_land_report_pdf(land: Land, analysis: Analysis, details: dict | None = None) -> bytes:
-    """Renders a comprehensive, null-safe 25-section land analysis report PDF and returns it as bytes."""
+    """Renders a comprehensive, null-safe land analysis report PDF and returns it as bytes."""
     buffer = BytesIO()
     land_title = land.land_name or "Selected Parcel"
     doc = SimpleDocTemplate(
@@ -88,8 +89,14 @@ def generate_land_report_pdf(land: Land, analysis: Analysis, details: dict | Non
     cost_est = details.get("construction_cost", {}) if details else {}
 
     area_sqft = float(land.area_sqft) if (land.area_sqft is not None and land.area_sqft > 0) else 1500.0
-    area_sqm = area_conv.get("sqm", round(area_sqft / 10.7639, 2))
-    area_cents = area_conv.get("cents", round(area_sqft / 435.6, 4))
+    all_conversions = get_all_area_conversions(area_sqft)
+    area_sqm = area_conv.get("sqm", all_conversions["sqm"])
+    area_cents = area_conv.get("cents", all_conversions["cents"])
+    area_acres = area_conv.get("acres", all_conversions["acres"])
+    
+    area_source = getattr(land, "area_source", "polygon") or prop.get("area_source", "polygon")
+    area_source_label = "User-entered Land Area" if area_source == "direct_input" else "Area calculated from selected land boundary"
+    
     btype = analysis.recommended_building_type or "Residential House"
 
     # Boundary text
@@ -102,7 +109,10 @@ def generate_land_report_pdf(land: Land, analysis: Analysis, details: dict | Non
 
     has_boundary = bool(isinstance(boundary_data, dict) and boundary_data.get("coordinates"))
     vertex_count = len(boundary_data["coordinates"][0]) if (has_boundary and isinstance(boundary_data.get("coordinates"), list) and len(boundary_data["coordinates"]) > 0) else 0
-    boundary_text = f"Polygon captured ({vertex_count} vertices)" if has_boundary else "Single-point coordinate centroid"
+    if area_source == "direct_input":
+        boundary_text = "Direct area entry (representative GPS centroid)"
+    else:
+        boundary_text = f"Polygon captured ({vertex_count} vertices)" if has_boundary else "Single-point coordinate centroid"
 
     lat_str = f"{land.latitude:.6f}" if land.latitude is not None else "N/A"
     lng_str = f"{land.longitude:.6f}" if land.longitude is not None else "N/A"
@@ -115,9 +125,11 @@ def generate_land_report_pdf(land: Land, analysis: Analysis, details: dict | Non
          Paragraph("Target Building Type", label_style), Paragraph(btype, bold_value_style)],
         [Paragraph("Locality Address", label_style), Paragraph(land.address or "Unknown Address", value_style),
          Paragraph("Geodetic Coordinates", label_style), Paragraph(coords_display, value_style)],
-        [Paragraph("Polygon Area (sq.ft)", label_style), Paragraph(f"{area_sqft:,.2f} sq.ft", bold_value_style),
+        [Paragraph("Parcel Area (sq.ft)", label_style), Paragraph(f"{area_sqft:,.2f} sq.ft", bold_value_style),
          Paragraph("Metric Area (m²)", label_style), Paragraph(f"{area_sqm:,.2f} m²", value_style)],
         [Paragraph("Regional Unit (Cents)", label_style), Paragraph(f"{area_cents:.4f} cents", bold_value_style),
+         Paragraph("Imperial Unit (Acres)", label_style), Paragraph(f"{area_acres:.4f} acres", bold_value_style)],
+        [Paragraph("Area Provenance / Source", label_style), Paragraph(f"<b>{area_source_label}</b>", bold_value_style),
          Paragraph("Boundary Geometry", label_style), Paragraph(boundary_text, value_style)],
     ]
     prop_table = Table(prop_rows, colWidths=[3.8 * cm, 5.5 * cm, 3.8 * cm, 5.5 * cm])
@@ -134,15 +146,15 @@ def generate_land_report_pdf(land: Land, analysis: Analysis, details: dict | Non
     # ---------------- 2. Plot Size Requirement Validation & Construction Cost Estimator ----------------
     story.append(Paragraph("2. Plot Size Requirement Validation & Indicative Construction Cost", section_style))
     
-    val_status_str = plot_val.get("status", f"Plot size ({area_sqft:,.0f} sq.ft) evaluated for {btype}.")
+    val_status_str = plot_val.get("message", f"Plot size ({area_sqft:,.0f} sq.ft) evaluated for {btype}.")
     is_suff = plot_val.get("is_sufficient", True)
     status_color = "#15803D" if is_suff else "#B91C1C"
     
-    rate_sqft_val = cost_est.get("rate_per_sqft_inr", 2000)
-    total_cost_val = cost_est.get("estimated_total_cost_inr", area_sqft * rate_sqft_val)
-    mat_cost_val = cost_est.get("material_cost_inr", total_cost_val * 0.55)
-    lab_cost_val = cost_est.get("labour_cost_inr", total_cost_val * 0.25)
-    fin_cost_val = cost_est.get("finishing_cost_inr", total_cost_val * 0.20)
+    rate_sqft_val = cost_est.get("rate_per_sqft_inr", cost_est.get("rate_per_sqft", 2000))
+    total_cost_val = cost_est.get("total_estimated_cost_inr", cost_est.get("total_estimated_cost", area_sqft * rate_sqft_val))
+    mat_cost_val = cost_est.get("material_cost_inr", cost_est.get("material_cost", total_cost_val * 0.55))
+    lab_cost_val = cost_est.get("labour_cost_inr", cost_est.get("labour_cost", total_cost_val * 0.25))
+    fin_cost_val = cost_est.get("finishing_cost_inr", cost_est.get("finishing_cost", total_cost_val * 0.20))
 
     val_rows = [
         [
@@ -348,4 +360,3 @@ def generate_land_report_pdf(land: Land, analysis: Analysis, details: dict | Non
 
     doc.build(story)
     return buffer.getvalue()
-

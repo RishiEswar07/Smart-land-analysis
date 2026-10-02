@@ -23,17 +23,23 @@ from app.models.land import Land, LandType, SoilType
 from app.services.exceptions import NotFoundError
 from app.services.soil_service import fetch_soilgrids_data
 from app.services.landcover_service import get_land_cover, LandCoverLookupError
+from app.utils.area_units import (
+    get_all_area_conversions,
+    validate_building_plot_feasibility,
+    calculate_indicative_construction_cost,
+    BUILDING_RULES,
+)
 
 logger = logging.getLogger(__name__)
 
 # ============================================================
-# ML Model Training (In-Memory Mock on Startup)
+# ML Model Training (In-Memory on Startup from Historical Data)
 # ============================================================
 
 _soil_types = [s.value for s in SoilType]
 _land_types = [l.value for l in LandType]
 
-# Instead of generating synthetic data, we load the real historical datasets
+# Load real historical datasets
 def _load_real_dataset():
     import os
     dataset_path = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'land_risk_dataset.csv')
@@ -85,7 +91,7 @@ def _get_nearest_regional_info(lat: float, lng: float):
         return None
 
 # ============================================================
-# Core Functions
+# Core Scoring & Feature Extraction Functions
 # ============================================================
 
 def _clip(value: float, lo: float = 0.0, hi: float = 100.0) -> float:
@@ -226,15 +232,7 @@ def compute_hydrological_flood_risk(
 ) -> float:
     """
     Physically-based continuous hydrological flood risk scoring.
-    Combines:
-    1. Geomorphic elevation baseline (meters above sea level)
-    2. Real-time river discharge (m³/s from Open-Meteo Flood API)
-    3. Soil percolation & drainage capacity
-    4. Satellite land cover proximity / water bodies
     """
-    # 1. Elevation Curve
-    # Lowlands (<10m) have high baseline flood vulnerability;
-    # Uplands & hills (>100m) have low to negligible baseline river flooding.
     if elevation <= 5.0:
         elev_risk = 85.0 - (elevation / 5.0) * 10.0
     elif elevation <= 20.0:
@@ -248,7 +246,6 @@ def compute_hydrological_flood_risk(
     else:
         elev_risk = max(3.0, 6.0 - ((elevation - 200.0) / 300.0) * 3.0)
 
-    # 2. River Discharge Impact (Open-Meteo daily river discharge in m³/s)
     if discharge <= 10.0:
         flow_risk = 0.0
     elif discharge <= 100.0:
@@ -260,11 +257,9 @@ def compute_hydrological_flood_risk(
     else:
         flow_risk = min(85.0, 70.0 + ((discharge - 1500.0) / 2000.0) * 15.0)
 
-    # If elevation is high (> 120m), high river flow in distant regional channels has reduced impact on the plot
     if elevation > 120.0:
         flow_risk = flow_risk * max(0.1, (250.0 - elevation) / 130.0)
 
-    # 3. Soil Drainage Adjustment
     soil_adj = 0.0
     s_lower = (soil_type or "").lower()
     if "clay" in s_lower or "black" in s_lower:
@@ -272,10 +267,8 @@ def compute_hydrological_flood_risk(
     elif "sand" in s_lower or "red" in s_lower or "rock" in s_lower or "gravel" in s_lower:
         soil_adj = -4.0
 
-    # 4. Combined Raw Flood Risk
     flood_score = (elev_risk * 0.70) + (flow_risk * 0.30) + soil_adj
 
-    # 5. Satellite Land-Cover Overrides
     if land_cover_category in ["Water", "Wetland", "Mangroves"]:
         flood_score = max(flood_score, 90.0)
 
@@ -337,11 +330,11 @@ async def compute_analysis(land: Land) -> _AnalysisResult:
     preds = reg_risk.predict(x_input)[0]
     _, env_score, access_score, infra_risk, _, _ = (round(_clip(p), 1) for p in preds)
     
-    # Accurate physically-based flood risk from live Open-Meteo elevation and river discharge
+    # Flood score
     lc_cat = land_cover_res.category if land_cover_res else None
     flood_score = compute_hydrological_flood_risk(elevation, discharge, s_val_clean, lc_cat)
     
-    # 4. Regional Dataset Penalties & Overrides
+    # 4. Regional Dataset Penalties
     if reg_info:
         cover = reg_info.get('land_cover')
         hist_flood = reg_info.get('historical_floods', 0) or reg_info.get('flood_occurred', 0)
@@ -350,7 +343,7 @@ async def compute_analysis(land: Land) -> _AnalysisResult:
         if hist_flood == 1 and elevation < 80.0:
             flood_score = round(_clip(flood_score + 15.0), 1)
 
-    # 5. ESA WorldCover High-Confidence Ground-Truth Overrides
+    # 5. ESA WorldCover Overrides
     if land_cover_res:
         if land_cover_res.construction_suitability == "Unsuitable":
             env_score = max(env_score, 95.0)
@@ -359,7 +352,7 @@ async def compute_analysis(land: Land) -> _AnalysisResult:
         elif land_cover_res.construction_suitability == "Caution":
             env_score = round(_clip(env_score + 15.0), 1)
     
-    # Aggregate Risk Score & Suitability directly from physical components
+    # Aggregate Risk Score & Suitability
     risk_score = round(_clip(flood_score * 0.35 + access_score * 0.25 + infra_risk * 0.25 + env_score * 0.15), 1)
     suitability = round(_clip(100.0 - risk_score), 1)
     if land_cover_res and land_cover_res.construction_suitability == "Unsuitable":
@@ -450,25 +443,13 @@ async def get_analysis(db: AsyncSession, analysis_id: uuid.UUID) -> Analysis:
     return analysis
 
 
-BUILDING_RULES = {
-    "Individual House": {"min_sqft": 400.0, "rate_inr_sqft": 2000, "label": "Individual House"},
-    "Residential House": {"min_sqft": 400.0, "rate_inr_sqft": 2000, "label": "Residential House"},
-    "Apartment": {"min_sqft": 2000.0, "rate_inr_sqft": 2200, "label": "Multi-Unit Apartment"},
-    "Commercial Building": {"min_sqft": 1500.0, "rate_inr_sqft": 2500, "label": "Commercial Building"},
-    "School": {"min_sqft": 5000.0, "rate_inr_sqft": 2000, "label": "Educational Facility / School"},
-    "Hospital": {"min_sqft": 10000.0, "rate_inr_sqft": 3000, "label": "Hospital / Healthcare Facility"},
-    "Hospital/Clinic": {"min_sqft": 10000.0, "rate_inr_sqft": 3000, "label": "Hospital / Healthcare Facility"},
-}
-
-
 def build_detailed_analysis_dict(land: Land, analysis: Analysis) -> dict:
     """
     Constructs a comprehensive, transparent detailed analysis payload
     containing factor scores with dynamic 'Why?' explanations,
-    real geodesic area conversions (m², sqft, cents), plot size validation,
-    indicative construction cost estimator, provenance metadata, data quality,
-    calculation methodology, and regulatory disclaimers.
-    Uses actual computed project values only.
+    4-unit area conversions (m², sqft, cents, acres), area source provenance,
+    plot size validation, indicative construction cost estimator, data quality,
+    data sources provenance, and regulatory disclaimers.
     """
     # 1. Extract raw risk scores from stored analysis breakdown
     rb = analysis.risk_breakdown or {}
@@ -494,69 +475,32 @@ def build_detailed_analysis_dict(land: Land, analysis: Analysis) -> dict:
             return "Moderate"
         return "Negative"
 
-    # 3. Geodesic Polygon Area Conversions (Single Source of Truth)
+    # 3. Area conversions and provenance
     has_coords = land.latitude is not None and land.longitude is not None
     has_road = land.road_width is not None and land.road_width > 0
     has_soil = land.soil_type is not None
     has_utilities = land.water_availability is not None and land.electricity_availability is not None
 
     area_sqft = float(land.area_sqft) if (land.area_sqft is not None and land.area_sqft > 0) else 1500.0
-    area_sqm = round(area_sqft / 10.7639, 2)
-    area_cents = round(area_sqft / 435.6, 4)
+    area_conversions = get_all_area_conversions(area_sqft)
+
+    area_source = getattr(land, "area_source", "polygon") or "polygon"
+    input_unit = getattr(land, "input_unit", "sq.ft") or "sq.ft"
+    input_area = getattr(land, "area", area_sqft) or area_sqft
+
+    if area_source == "direct_input":
+        source_label = "User-entered Land Area"
+        source_desc = f"Direct numerical area input ({input_area:g} {input_unit}). Geodesic lookups performed at representative point."
+    else:
+        source_label = "Area calculated from selected land boundary"
+        source_desc = "Exact boundary polygon drawn on GIS map. Area calculated using Turf.js geodesic geometry."
 
     # 4. Plot Size vs Building Requirement Validation
     btype = analysis.recommended_building_type or "Residential House"
-    rule = BUILDING_RULES.get(btype, BUILDING_RULES.get("Residential House", {"min_sqft": 400.0, "rate_inr_sqft": 2000}))
-    min_sqft = float(rule["min_sqft"])
-    is_sufficient = area_sqft >= min_sqft
-    diff_sqft = round(area_sqft - min_sqft, 1)
-
-    if is_sufficient:
-        val_status = f"Plot size ({area_sqft:,.0f} sq.ft) is sufficient for {btype} (surplus of {diff_sqft:,.0f} sq.ft)."
-    else:
-        val_status = f"WARNING: Plot size ({area_sqft:,.0f} sq.ft) is too small for {btype}. Recommended minimum is {min_sqft:,.0f} sq.ft (deficit of {abs(diff_sqft):,.0f} sq.ft)."
-
-    plot_validation = {
-        "building_type": btype,
-        "actual_area_sqft": area_sqft,
-        "actual_sqft": area_sqft,
-        "actual_area_sqm": area_sqm,
-        "actual_area_cents": area_cents,
-        "required_min_sqft": min_sqft,
-        "min_required_sqft": min_sqft,
-        "is_valid": is_sufficient,
-        "is_sufficient": is_sufficient,
-        "deficit_or_surplus_sqft": abs(diff_sqft),
-        "difference_sqft": diff_sqft,
-        "status": "SUITABLE" if is_sufficient else "DEFICIT",
-        "message": val_status,
-    }
+    plot_validation = validate_building_plot_feasibility(area_sqft, btype)
 
     # 5. Indicative Construction Cost Estimation
-    rate_sqft = rule["rate_inr_sqft"]
-    est_total_cost = round(area_sqft * rate_sqft, 2)
-    mat_cost = round(est_total_cost * 0.55, 2)
-    lab_cost = round(est_total_cost * 0.25, 2)
-    oth_cost = round(est_total_cost * 0.20, 2)
-
-    construction_cost = {
-        "building_type": btype,
-        "area_sqft": area_sqft,
-        "rate_per_sqft": rate_sqft,
-        "rate_per_sqft_inr": rate_sqft,
-        "total_estimated_cost": est_total_cost,
-        "total_estimated_cost_inr": est_total_cost,
-        "material_cost": mat_cost,
-        "material_cost_inr": mat_cost,
-        "material_pct": 55,
-        "labour_cost": lab_cost,
-        "labour_cost_inr": lab_cost,
-        "labour_pct": 25,
-        "finishing_cost": oth_cost,
-        "finishing_cost_inr": oth_cost,
-        "finishing_pct": 20,
-        "disclaimer": "Construction rates are configurable estimates and are not an official government quotation.",
-    }
+    construction_cost = calculate_indicative_construction_cost(area_sqft, btype)
 
     # 6. Scientific Data Quality & Completeness Indicators
     quality_items = [
@@ -645,7 +589,7 @@ def build_detailed_analysis_dict(land: Land, analysis: Analysis) -> dict:
         land_use_why = "Satellite land-cover indicates ecological sensitivity, tree cover, or proximity to water bodies."
 
     if dev_potential_score >= 70:
-        dev_why = f"Parcel area ({area_sqft:,.0f} sq.ft / {area_cents:.2f} cents) and road corridor strongly support {btype} development."
+        dev_why = f"Parcel area ({area_sqft:,.0f} sq.ft / {area_conversions['cents']:.2f} cents) and road corridor strongly support {btype} development."
     else:
         dev_why = f"Development viability is constrained by parcel size ({area_sqft:,.0f} sq.ft) relative to {btype} standard requirements."
 
@@ -709,7 +653,7 @@ def build_detailed_analysis_dict(land: Land, analysis: Analysis) -> dict:
             "why_reason": dev_why,
             "data_source": "Spatial Feasibility & Plot Size Evaluation",
             "data_confidence": "High (90%)",
-            "description": f"Synthesized from parcel area ({area_sqft:,.0f} sq.ft / {area_cents:.2f} cents), road corridor, and demand.",
+            "description": f"Synthesized from parcel area ({area_sqft:,.0f} sq.ft / {area_conversions['cents']:.2f} cents), road corridor, and demand.",
         },
         {
             "name": "Data Confidence",
@@ -816,8 +760,14 @@ def build_detailed_analysis_dict(land: Land, analysis: Analysis) -> dict:
             "longitude": land.longitude,
             "coordinates_display": f"{land.latitude:.6f}, {land.longitude:.6f}" if has_coords else "Data unavailable",
             "area_sqft": area_sqft,
-            "area_sqm": area_sqm,
-            "area_cents": area_cents,
+            "area_sqm": area_conversions["sqm"],
+            "area_cents": area_conversions["cents"],
+            "area_acres": area_conversions["acres"],
+            "input_area": input_area,
+            "input_unit": input_unit,
+            "area_source": area_source,
+            "area_source_display": source_label,
+            "area_source_description": source_desc,
             "road_width_ft": land.road_width,
             "soil_type": soil_name,
             "land_type": land.land_type.value if land.land_type else "Residential",
@@ -828,10 +778,14 @@ def build_detailed_analysis_dict(land: Land, analysis: Analysis) -> dict:
             "created_at": land.created_at.isoformat() if land.created_at else None,
         },
         "area_conversions": {
-            "sqft": area_sqft,
-            "sqm": area_sqm,
-            "cents": area_cents,
-            "formatted_display": f"{area_sqm:,.2f} m² | {area_sqft:,.2f} sq.ft | {area_cents:.4f} cents",
+            "sqft": area_conversions["sqft"],
+            "sqm": area_conversions["sqm"],
+            "cents": area_conversions["cents"],
+            "acres": area_conversions["acres"],
+            "formatted_display": area_conversions["formatted_display"],
+            "source": area_source,
+            "source_label": source_label,
+            "source_description": source_desc,
         },
         "plot_validation": plot_validation,
         "construction_cost": construction_cost,
@@ -893,4 +847,3 @@ async def get_detailed_analysis_by_id(db: AsyncSession, analysis_id: uuid.UUID, 
         raise NotFoundError(entity="Analysis", identifier=str(analysis_id))
     analysis, land = row
     return build_detailed_analysis_dict(land, analysis)
-

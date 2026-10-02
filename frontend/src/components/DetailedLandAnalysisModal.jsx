@@ -8,8 +8,9 @@ import Loader from './Loader'
  * DetailedLandAnalysisModal
  * -------------------------
  * Comprehensive, interactive breakdown modal for land analysis.
- * Displays factor scores, data quality, data sources provenance,
- * calculation methodology, historical change note, and multi-format exports.
+ * Displays factor scores, 4-unit area conversions (sq.ft, sq.m, cents, acres),
+ * area source provenance, data quality, data sources provenance,
+ * calculation methodology, and multi-format exports.
  */
 export default function DetailedLandAnalysisModal({
   isOpen,
@@ -73,7 +74,12 @@ export default function DetailedLandAnalysisModal({
 
   const areaSqFt = areaConv.sqft ?? prop.area_sqft ?? 0
   const areaSqm = areaConv.sqm ?? (areaSqFt ? (areaSqFt / 10.7639).toFixed(1) : 0)
-  const areaCents = areaConv.cents ?? (areaSqFt ? (areaSqFt / 435.6).toFixed(2) : 0)
+  const areaCents = areaConv.cents ?? (areaSqFt ? (areaSqFt / 435.6).toFixed(4) : 0)
+  const areaAcres = areaConv.acres ?? (areaSqFt ? (areaSqFt / 43560).toFixed(4) : 0)
+
+  const areaSource = prop.area_source || areaConv.source || 'polygon'
+  const isDirectInput = areaSource === 'direct_input'
+  const sourceLabel = isDirectInput ? 'User-entered Land Area' : 'Area calculated from selected land boundary'
 
   const handleExport = async (format) => {
     if (!analysisId) return
@@ -185,7 +191,13 @@ export default function DetailedLandAnalysisModal({
 
             {/* Property Characteristics Table */}
             <div className="md:col-span-2 bg-white rounded-xl p-5 border border-slate-200 shadow-sm flex flex-col justify-between">
-              <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Property Profile</h4>
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Property Profile</h4>
+                <span className="text-[11px] font-bold text-blue-700 bg-blue-50 border border-blue-200 px-2.5 py-0.5 rounded-full">
+                  {sourceLabel}
+                </span>
+              </div>
+
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
                 <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
                   <span className="text-slate-400 block text-[10px]">Location</span>
@@ -196,7 +208,7 @@ export default function DetailedLandAnalysisModal({
                   <span className="font-semibold text-blue-700">{prop.selected_building_type || 'Individual House'}</span>
                 </div>
                 <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
-                  <span className="text-slate-400 block text-[10px]">Parcel Area</span>
+                  <span className="text-slate-400 block text-[10px]">Parcel Area (Normalized)</span>
                   <div className="font-semibold text-slate-800">
                     <div>{Number(areaSqFt).toLocaleString()} sq.ft</div>
                     <div className="text-[10px] text-slate-500 font-normal">
@@ -229,16 +241,53 @@ export default function DetailedLandAnalysisModal({
             </div>
           </div>
 
+          {/* Section 1.2: 4-Unit Area Conversion Table & Source Provenance */}
+          <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                <span>🔄</span> Land Area Measurements (4 Standard Units)
+              </span>
+              <span className="text-xs text-slate-500 font-medium">
+                Source: <strong>{sourceLabel}</strong>
+              </span>
+            </div>
+            
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+              <div className="bg-white p-2.5 rounded-lg border border-slate-200">
+                <span className="text-slate-400 block text-[10px]">Square Feet (sq.ft)</span>
+                <strong className="text-sm font-black text-blue-700">{Number(areaSqFt).toLocaleString()} sq.ft</strong>
+              </div>
+              <div className="bg-white p-2.5 rounded-lg border border-slate-200">
+                <span className="text-slate-400 block text-[10px]">Square Meters (m²)</span>
+                <strong className="text-sm font-black text-slate-800">{Number(areaSqm).toLocaleString()} m²</strong>
+              </div>
+              <div className="bg-white p-2.5 rounded-lg border border-slate-200">
+                <span className="text-slate-400 block text-[10px]">Cents</span>
+                <strong className="text-sm font-black text-slate-800">{Number(areaCents).toFixed(4)} cents</strong>
+              </div>
+              <div className="bg-white p-2.5 rounded-lg border border-slate-200">
+                <span className="text-slate-400 block text-[10px]">Acres</span>
+                <strong className="text-sm font-black text-slate-800">{Number(areaAcres).toFixed(4)} acres</strong>
+              </div>
+            </div>
+
+            {isDirectInput && (
+              <p className="text-[11px] text-slate-500 mt-2 leading-relaxed">
+                * Note: Evaluated via direct area entry ({prop.input_area || areaSqFt} {prop.input_unit || 'sq.ft'}). Environmental and hydrological factors were analyzed at the representative location point on the map.
+              </p>
+            )}
+          </div>
+
           {/* Section 1.5: Plot Size Validation & Indicative Construction Cost */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Plot Size Validation Card */}
-            <div className={`p-4 rounded-xl border ${plotVal.is_valid !== false ? 'bg-emerald-50/60 border-emerald-200' : 'bg-rose-50/60 border-rose-200'}`}>
+            <div className={`p-4 rounded-xl border ${plotVal.is_valid !== false && plotVal.is_sufficient !== false ? 'bg-emerald-50/60 border-emerald-200' : 'bg-rose-50/60 border-rose-200'}`}>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
                   <span>📐</span> Plot Requirement Validation
                 </span>
                 <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full uppercase tracking-wider border ${
-                  plotVal.is_valid !== false 
+                  plotVal.is_valid !== false && plotVal.is_sufficient !== false
                     ? 'bg-emerald-100 text-emerald-800 border-emerald-300' 
                     : 'bg-rose-100 text-rose-800 border-rose-300'
                 }`}>
@@ -248,7 +297,7 @@ export default function DetailedLandAnalysisModal({
               <div className="text-xs text-slate-700 space-y-1">
                 <div className="flex justify-between">
                   <span className="text-slate-500">Minimum Required Area:</span>
-                  <span className="font-bold">{Number(plotVal.required_min_sqft || 400).toLocaleString()} sq.ft</span>
+                  <span className="font-bold">{Number(plotVal.min_required_sqft || plotVal.required_min_sqft || 400).toLocaleString()} sq.ft</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Actual Parcel Area:</span>
@@ -256,8 +305,8 @@ export default function DetailedLandAnalysisModal({
                 </div>
                 <div className="flex justify-between pt-1 border-t border-slate-200/60 font-semibold">
                   <span className="text-slate-600">Surplus / Deficit:</span>
-                  <span className={plotVal.is_valid !== false ? 'text-emerald-700' : 'text-rose-700'}>
-                    {plotVal.is_valid !== false ? '+' : '-'}{Number(plotVal.deficit_or_surplus_sqft || 0).toLocaleString()} sq.ft
+                  <span className={plotVal.is_valid !== false && plotVal.is_sufficient !== false ? 'text-emerald-700' : 'text-rose-700'}>
+                    {plotVal.is_valid !== false && plotVal.is_sufficient !== false ? '+' : '-'}{Number(plotVal.deficit_or_surplus_sqft || 0).toLocaleString()} sq.ft
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-600 pt-1 leading-snug">
@@ -273,29 +322,29 @@ export default function DetailedLandAnalysisModal({
                   <span>🏗️</span> Construction Cost Estimator
                 </span>
                 <span className="text-xs font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
-                  ₹{Number(cost.rate_per_sqft || 2000).toLocaleString()}/sq.ft
+                  ₹{Number(cost.rate_per_sqft || cost.rate_per_sqft_inr || 2000).toLocaleString()}/sq.ft
                 </span>
               </div>
               <div className="text-xs space-y-1.5">
                 <div className="flex justify-between items-baseline">
                   <span className="text-slate-500">Total Estimated Cost:</span>
                   <span className="text-base font-black text-slate-900">
-                    ₹{Number(cost.total_estimated_cost || (areaSqFt * 2000)).toLocaleString()}
+                    ₹{Number(cost.total_estimated_cost || cost.total_estimated_cost_inr || (areaSqFt * 2000)).toLocaleString()}
                   </span>
                 </div>
                 {/* Cost Breakdown Bars */}
                 <div className="grid grid-cols-3 gap-1.5 text-[10px] pt-1">
                   <div className="bg-white p-1.5 rounded border border-slate-200">
                     <span className="text-slate-400 block">Material (55%)</span>
-                    <strong className="text-slate-800">₹{Number(cost.material_cost || (areaSqFt * 2000 * 0.55)).toLocaleString()}</strong>
+                    <strong className="text-slate-800">₹{Number(cost.material_cost || cost.material_cost_inr || (areaSqFt * 2000 * 0.55)).toLocaleString()}</strong>
                   </div>
                   <div className="bg-white p-1.5 rounded border border-slate-200">
                     <span className="text-slate-400 block">Labour (25%)</span>
-                    <strong className="text-slate-800">₹{Number(cost.labour_cost || (areaSqFt * 2000 * 0.25)).toLocaleString()}</strong>
+                    <strong className="text-slate-800">₹{Number(cost.labour_cost || cost.labour_cost_inr || (areaSqFt * 2000 * 0.25)).toLocaleString()}</strong>
                   </div>
                   <div className="bg-white p-1.5 rounded border border-slate-200">
                     <span className="text-slate-400 block">Finishing (20%)</span>
-                    <strong className="text-slate-800">₹{Number(cost.finishing_cost || (areaSqFt * 2000 * 0.20)).toLocaleString()}</strong>
+                    <strong className="text-slate-800">₹{Number(cost.finishing_cost || cost.finishing_cost_inr || (areaSqFt * 2000 * 0.20)).toLocaleString()}</strong>
                   </div>
                 </div>
                 <p className="text-[10px] text-slate-400 pt-0.5 leading-tight">

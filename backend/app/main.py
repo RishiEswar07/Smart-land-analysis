@@ -188,7 +188,7 @@ def create_application() -> FastAPI:
     async def health_check():
         """Health check endpoint - verifies the API process is alive."""
         return {
-            "status": "ok",
+            "status": "healthy",
             "message": "Smart Land Analysis API is running",
         }
 
