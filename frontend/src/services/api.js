@@ -155,7 +155,6 @@ function extractErrorMessage(error) {
     return 'The requested resource was not found.'
   }
 
-  // 4. Cold-Start / Network Connection Failures
   const isColdStartOrNetwork =
     error.code === 'ERR_NETWORK' ||
     error.code === 'ECONNABORTED' ||
@@ -172,11 +171,11 @@ function extractErrorMessage(error) {
     return 'Backend is waking up. Please wait a few seconds and try again.'
   }
 
-  return error.message || 'Something went wrong. Please try again.'
+  return error.message || 'An unexpected error occurred. Please try again.'
 }
 
 /**
- * Lightweight background ping to wake up the Render container proactively on app mount.
+ * Lightweight background ping to wake up the Render container proactively.
  */
 export const pingBackend = async () => {
   try {
@@ -187,4 +186,18 @@ export const pingBackend = async () => {
   }
 }
 
+/**
+ * Checks backend health status. Returns true if healthy/200 OK, false otherwise.
+ */
+export const checkBackendHealth = async () => {
+  try {
+    const healthUrl = getHealthCheckUrl()
+    const res = await axios.get(healthUrl, { timeout: 8000 })
+    return res.status === 200 && (res.data?.status === 'healthy' || res.data?.status === 'ok')
+  } catch (err) {
+    return false
+  }
+}
+
 export default api
+

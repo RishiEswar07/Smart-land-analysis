@@ -14,6 +14,7 @@ import landService from '../services/landService'
 import analysisService from '../services/analysisService'
 import geocodeService from '../services/geocodeService'
 import gisService, { normalizeSoilType, calculatePolygonAreaSqFt, generateEstimatedParcel } from '../services/gisService'
+import { checkBackendHealth } from '../services/api'
 import {
   INPUT_UNITS,
   convertAreaToSqFt,
@@ -77,9 +78,44 @@ export default function LandAnalysis() {
   
   const [fetching, setFetching] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [backendReady, setBackendReady] = useState(false)
   const [error, setError] = useState(null)
   const [result, setResult] = useState(savedState?.result || null)
   const [showDetailedModal, setShowDetailedModal] = useState(false)
+
+  // Silent background health polling on mount to wake Render container and ensure readiness
+  useEffect(() => {
+    let isMounted = true
+    let pollTimer = null
+
+    const checkHealth = async () => {
+      try {
+        const isHealthy = await checkBackendHealth()
+        if (!isMounted) return
+
+        if (isHealthy) {
+          setBackendReady(true)
+          // Automatically clear any waking error when backend responds healthy
+          setError(prev => (prev && prev.includes('waking up') ? null : prev))
+        } else {
+          setBackendReady(false)
+          pollTimer = setTimeout(checkHealth, 2500)
+        }
+      } catch (e) {
+        if (isMounted) {
+          setBackendReady(false)
+          pollTimer = setTimeout(checkHealth, 2500)
+        }
+      }
+    }
+
+    checkHealth()
+
+    return () => {
+      isMounted = false
+      if (pollTimer) clearTimeout(pollTimer)
+    }
+  }, [])
 
   // Fallback for missing area in summary
   const [manualArea, setManualArea] = useState(savedState?.manualArea || '')
@@ -242,6 +278,8 @@ export default function LandAnalysis() {
   }
 
   const handleAnalyze = async () => {
+    if (!backendReady) return;
+
     let finalSqFt = gisData.area_sqft;
     let rawArea = gisData.area;
     let inputUnit = gisData.input_unit || 'sq.ft';
@@ -284,7 +322,21 @@ export default function LandAnalysis() {
       setStep('result')
     } catch (err) {
       console.error("Analysis execution error:", err);
-      setError(err.message || 'Analysis failed. Please ensure you are logged in and backend is connected.')
+      const errMsg = err.message || 'Analysis failed. Please ensure you are logged in and backend is connected.';
+      if (errMsg.includes('waking up')) {
+        setBackendReady(false);
+        const pollAgain = async () => {
+          const healthy = await checkBackendHealth();
+          if (healthy) {
+            setBackendReady(true);
+            setError((prev) => (prev && prev.includes('waking up') ? null : prev));
+          } else {
+            setTimeout(pollAgain, 2500);
+          }
+        };
+        setTimeout(pollAgain, 2500);
+      }
+      setError(errMsg);
     } finally {
       setSubmitting(false)
     }
@@ -609,7 +661,9 @@ export default function LandAnalysis() {
               </div>
             )}
 
-            {error && <p className="text-xs text-rose-600 bg-rose-50 p-2.5 rounded border border-rose-200">{error}</p>}
+            {error && !error.includes('waking up') && (
+              <p className="text-xs text-rose-600 bg-rose-50 p-2.5 rounded border border-rose-200">{error}</p>
+            )}
 
             <div className="flex gap-2 pt-2 border-t border-slate-100">
               <button 
@@ -822,24 +876,36 @@ export default function LandAnalysis() {
               )}
             </div>
 
-            {error && (
+            {error && !error.includes('waking up') && (
               <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700">
                 {error}
               </div>
             )}
 
             <button 
-              className="w-full bg-blue-600 text-white font-bold py-3.5 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 shadow-md flex items-center justify-center gap-2"
+              className={`w-full font-bold py-3.5 rounded-lg transition-all shadow-md flex items-center justify-center gap-2 ${
+                submitting || !backendReady
+                  ? 'bg-slate-200 text-slate-500 cursor-not-allowed border border-slate-300'
+                  : 'bg-blue-600 text-white hover:bg-blue-700'
+              }`}
               onClick={handleAnalyze}
-              disabled={submitting}
+              disabled={submitting || !backendReady}
             >
               {submitting ? (
                 <>
-                  <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                  <svg className="animate-spin h-4 w-4 text-slate-500" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                   </svg>
                   <span>Running ML Analysis...</span>
+                </>
+              ) : !backendReady ? (
+                <>
+                  <svg className="animate-spin h-4 w-4 text-slate-500" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  <span>Waking up server (please wait)...</span>
                 </>
               ) : (
                 <span>Confirm & Run AI Analysis →</span>
