@@ -175,19 +175,20 @@ function extractErrorMessage(error) {
 
 /**
  * Lightweight background ping to wake up the Render container proactively.
+ * Completely non-blocking and silent.
  */
 export const pingBackend = async () => {
   try {
     const healthUrl = getHealthCheckUrl()
-    await axios.get(healthUrl, { timeout: 15000 })
+    axios.get(healthUrl, { timeout: 2000 }).catch(() => {})
   } catch (err) {
-    // Proactive background ping - non-blocking
+    // Silent fail-safe
   }
 }
 
 /**
  * Checks backend health status. Returns true if healthy/200 OK, false otherwise.
- * Runs non-blocking parallel checks across candidate endpoints with short 4s timeouts.
+ * Runs non-blocking parallel checks across candidate endpoints with max 2s timeouts.
  */
 export const checkBackendHealth = async () => {
   const primaryUrl = getHealthCheckUrl()
@@ -203,7 +204,7 @@ export const checkBackendHealth = async () => {
   try {
     const results = await Promise.allSettled(
       uniqueUrls.map((url) =>
-        axios.get(url, { timeout: 4000 }).then((res) => res.status === 200)
+        axios.get(url, { timeout: 2000 }).then((res) => res.status === 200)
       )
     )
     return results.some((r) => r.status === 'fulfilled' && r.value === true)
