@@ -98,22 +98,28 @@ export default function LandAnalysis() {
           // Automatically clear any waking error when backend responds healthy
           setError(prev => (prev && prev.includes('waking up') ? null : prev))
         } else {
-          setBackendReady(false)
-          pollTimer = setTimeout(checkHealth, 2500)
+          pollTimer = setTimeout(checkHealth, 2000)
         }
       } catch (e) {
         if (isMounted) {
-          setBackendReady(false)
-          pollTimer = setTimeout(checkHealth, 2500)
+          pollTimer = setTimeout(checkHealth, 2000)
         }
       }
     }
 
     checkHealth()
 
+    // Safety fallback: ensure backendReady becomes true after 3 seconds so button is never frozen
+    const safetyTimer = setTimeout(() => {
+      if (isMounted) {
+        setBackendReady(true)
+      }
+    }, 3000)
+
     return () => {
       isMounted = false
       if (pollTimer) clearTimeout(pollTimer)
+      clearTimeout(safetyTimer)
     }
   }, [])
 
@@ -278,8 +284,6 @@ export default function LandAnalysis() {
   }
 
   const handleAnalyze = async () => {
-    if (!backendReady) return;
-
     let finalSqFt = gisData.area_sqft;
     let rawArea = gisData.area;
     let inputUnit = gisData.input_unit || 'sq.ft';
@@ -884,16 +888,16 @@ export default function LandAnalysis() {
 
             <button 
               className={`w-full font-bold py-3.5 rounded-lg transition-all shadow-md flex items-center justify-center gap-2 ${
-                submitting || !backendReady
-                  ? 'bg-slate-200 text-slate-500 cursor-not-allowed border border-slate-300'
+                submitting
+                  ? 'bg-blue-600 text-white opacity-85 cursor-wait'
                   : 'bg-blue-600 text-white hover:bg-blue-700'
               }`}
               onClick={handleAnalyze}
-              disabled={submitting || !backendReady}
+              disabled={submitting}
             >
               {submitting ? (
                 <>
-                  <svg className="animate-spin h-4 w-4 text-slate-500" fill="none" viewBox="0 0 24 24">
+                  <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                   </svg>
@@ -901,7 +905,7 @@ export default function LandAnalysis() {
                 </>
               ) : !backendReady ? (
                 <>
-                  <svg className="animate-spin h-4 w-4 text-slate-500" fill="none" viewBox="0 0 24 24">
+                  <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                   </svg>

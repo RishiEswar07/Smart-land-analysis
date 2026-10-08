@@ -14,21 +14,20 @@ export const getApiBaseUrl = () => {
   const envUrl = import.meta.env.VITE_API_BASE_URL
   const cleanEnvUrl = (envUrl && typeof envUrl === 'string') ? envUrl.trim().replace(/\/+$/, '') : ''
 
-  // 1. Local development: use IPv4 loopback directly
-  if (isLocal) {
-    if (cleanEnvUrl && (cleanEnvUrl.includes('localhost') || cleanEnvUrl.includes('127.0.0.1'))) {
-      return cleanEnvUrl
+  // 1. Explicit env URL takes precedence (if valid for the current environment)
+  if (cleanEnvUrl) {
+    if (!isLocal && (cleanEnvUrl.includes('localhost') || cleanEnvUrl.includes('127.0.0.1'))) {
+      return 'https://smart-land-analysis.onrender.com/api/v1'
     }
-    return 'http://127.0.0.1:8000/api/v1'
-  }
-
-  // 2. Production / Deployed environment (Vercel, custom domain):
-  // Never use localhost/127.0.0.1 on a public domain
-  if (cleanEnvUrl && !cleanEnvUrl.includes('localhost') && !cleanEnvUrl.includes('127.0.0.1')) {
     return cleanEnvUrl
   }
 
-  // Production default Render backend URL
+  // 2. Local development default
+  if (isLocal) {
+    return 'http://127.0.0.1:8000/api/v1'
+  }
+
+  // 3. Production default Render backend URL
   return 'https://smart-land-analysis.onrender.com/api/v1'
 }
 
@@ -190,14 +189,29 @@ export const pingBackend = async () => {
  * Checks backend health status. Returns true if healthy/200 OK, false otherwise.
  */
 export const checkBackendHealth = async () => {
-  try {
-    const healthUrl = getHealthCheckUrl()
-    const res = await axios.get(healthUrl, { timeout: 8000 })
-    return res.status === 200 && (res.data?.status === 'healthy' || res.data?.status === 'ok')
-  } catch (err) {
-    return false
+  const primaryUrl = getHealthCheckUrl()
+  const candidates = [
+    primaryUrl,
+    getApiBaseUrl() + '/health',
+    'https://smart-land-analysis.onrender.com/health',
+  ]
+
+  // Remove duplicates
+  const uniqueUrls = [...new Set(candidates)]
+
+  for (const url of uniqueUrls) {
+    try {
+      const res = await axios.get(url, { timeout: 4000 })
+      if (res.status === 200) {
+        return true
+      }
+    } catch (err) {
+      // Continue to next candidate
+    }
   }
+  return false
 }
 
 export default api
+
 
