@@ -3,10 +3,10 @@ import axios from 'axios'
 /**
  * Resolves the appropriate backend API base URL:
  * 1. Explicit environment variable: VITE_API_BASE_URL (if set)
- * 2. Local development: http://localhost:8000/api/v1 (when on localhost or 127.0.0.1)
+ * 2. Local development: http://127.0.0.1:8000/api/v1 (when on localhost or 127.0.0.1)
  * 3. Production deployment (Vercel / live domain): https://smart-land-analysis.onrender.com/api/v1
  */
-const getApiBaseUrl = () => {
+export const getApiBaseUrl = () => {
   const isBrowser = typeof window !== 'undefined' && window.location
   const host = isBrowser ? window.location.hostname : ''
   const isLocal = host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '::1' || host === ''
@@ -32,12 +32,21 @@ const getApiBaseUrl = () => {
   return 'https://smart-land-analysis.onrender.com/api/v1'
 }
 
+/**
+ * Resolves the root health-check URL for wake-up pings.
+ */
+export const getHealthCheckUrl = () => {
+  const base = getApiBaseUrl()
+  return base.replace(/\/api\/v1\/?$/, '') + '/health'
+}
+
+// 60-second timeout accommodates Render free-tier cold starts
 const api = axios.create({
   baseURL: getApiBaseUrl(),
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 35000,
+  timeout: 60000,
 })
 
 // ---- Request interceptor: attach JWT access token if present ----
@@ -49,13 +58,43 @@ api.interceptors.request.use((config) => {
   return config
 })
 
-// ---- Response interceptor: normalize errors, handle 401 ----
+// Max automatic retries for transient cold-start or connection failures
+const MAX_RETRIES = 2
+const RETRY_DELAY_MS = 2000
+
+// ---- Response interceptor: retry on cold start / network drop, normalize errors ----
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
+    const config = error.config
+
     if (error.response?.status === 401) {
       // Token expired / invalid — clear it so the UI can react
       localStorage.removeItem('access_token')
+    }
+
+    // Determine if this is a transient connection failure (e.g. Render spinning up / 502 / 503 / 504 / timeout)
+    const status = error.response?.status
+    const isTransientError =
+      !error.response ||
+      error.code === 'ERR_NETWORK' ||
+      error.code === 'ECONNABORTED' ||
+      error.message === 'Network Error' ||
+      status === 502 ||
+      status === 503 ||
+      status === 504
+
+    // Only retry transient cold-start failures (NEVER retry genuine 4xx client errors like 400, 401, 403, 422)
+    if (config && isTransientError && (!config._retryCount || config._retryCount < MAX_RETRIES)) {
+      config._retryCount = (config._retryCount || 0) + 1
+      const backoffMs = RETRY_DELAY_MS * config._retryCount
+
+      console.warn(
+        `[API] Transient connection failure (${error.message || status}). Retrying attempt ${config._retryCount}/${MAX_RETRIES} in ${backoffMs}ms...`
+      )
+
+      await new Promise((resolve) => setTimeout(resolve, backoffMs))
+      return api(config)
     }
 
     // If response is a Blob (e.g. from failed file download), parse it to extract actual error JSON
@@ -78,19 +117,20 @@ api.interceptors.response.use(
 )
 
 /**
- * FastAPI error responses come in two shapes:
- *   - Simple:      { detail: "Incorrect email or password." }            (string)
- *   - Validation:  { detail: [{ loc: [...], msg: "...", type: "..." }] } (422 array)
- * This normalizes both into a single human-readable string so callers
- * can always safely render `err.message` directly in the UI.
+ * FastAPI error responses come in various shapes.
+ * This function preserves genuine backend error details (e.g. "Invalid email or password",
+ * "Email already registered", validation errors) while mapping cold-start connection failures
+ * to a friendly "Backend is waking up" message.
  */
 function extractErrorMessage(error) {
   const isBrowser = typeof window !== 'undefined' && window.location
   const host = isBrowser ? window.location.hostname : ''
   const isLocal = host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '::1' || host === ''
 
-  const detail = error.response?.data?.detail
+  const status = error.response?.status
 
+  // 1. Validation Errors (422 array from Pydantic)
+  const detail = error.response?.data?.detail
   if (Array.isArray(detail)) {
     return detail
       .map((d) => {
@@ -100,18 +140,51 @@ function extractErrorMessage(error) {
       .join(' | ')
   }
 
+  // 2. Explicit string detail returned by backend (e.g. 400, 401, 404, 409)
   if (typeof detail === 'string') return detail
-
   if (error.response?.data?.message) return error.response.data.message
 
-  if (error.code === 'ERR_NETWORK' || error.message === 'Network Error' || !error.response) {
+  // 3. Status-based fallbacks for genuine HTTP errors
+  if (status === 401) {
+    return 'Invalid email or password. Please check your credentials.'
+  }
+  if (status === 403) {
+    return 'You do not have permission to perform this action.'
+  }
+  if (status === 404) {
+    return 'The requested resource was not found.'
+  }
+
+  // 4. Cold-Start / Network Connection Failures
+  const isColdStartOrNetwork =
+    error.code === 'ERR_NETWORK' ||
+    error.code === 'ECONNABORTED' ||
+    error.message === 'Network Error' ||
+    !error.response ||
+    status === 502 ||
+    status === 503 ||
+    status === 504
+
+  if (isColdStartOrNetwork) {
     if (isLocal) {
       return 'Cannot connect to backend server. Please verify FastAPI is running locally at http://127.0.0.1:8000.'
     }
-    return 'Cannot connect to production backend (https://smart-land-analysis.onrender.com). Please verify Render backend is running and DATABASE_URL is configured.'
+    return 'Backend is waking up. Please wait a few seconds and try again.'
   }
 
   return error.message || 'Something went wrong. Please try again.'
+}
+
+/**
+ * Lightweight background ping to wake up the Render container proactively on app mount.
+ */
+export const pingBackend = async () => {
+  try {
+    const healthUrl = getHealthCheckUrl()
+    await axios.get(healthUrl, { timeout: 15000 })
+  } catch (err) {
+    // Proactive background ping - non-blocking
+  }
 }
 
 export default api

@@ -66,10 +66,28 @@ export default function Login() {
               />
             </label>
 
-            {error && <p className="text-xs text-danger">{error}</p>}
+            {error && (
+              <div className={`p-3 rounded-lg text-xs leading-relaxed ${
+                error.includes('waking up')
+                  ? 'bg-amber-50 border border-amber-200 text-amber-800'
+                  : 'bg-rose-50 border border-rose-200 text-rose-700'
+              }`}>
+                {error.includes('waking up') ? (
+                  <div className="flex items-start gap-2">
+                    <span className="text-sm">⏳</span>
+                    <div>
+                      <strong className="block text-amber-900 mb-0.5">Server Initializing</strong>
+                      {error}
+                    </div>
+                  </div>
+                ) : (
+                  error
+                )}
+              </div>
+            )}
 
             <button type="submit" disabled={submitting} className="btn-primary w-full justify-center disabled:opacity-60">
-              {submitting ? 'Logging in…' : 'Log In'}
+              {submitting ? 'Connecting & Logging in…' : 'Log In'}
             </button>
           </form>
 

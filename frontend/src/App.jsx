@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { Routes, Route } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
@@ -9,8 +10,14 @@ import LandAnalysis from './pages/LandAnalysis'
 import Dashboard from './pages/Dashboard'
 import Reports from './pages/Reports'
 import About from './pages/About'
+import { pingBackend } from './services/api'
 
 export default function App() {
+  // Proactively ping the backend on initial page load to wake up Render container
+  useEffect(() => {
+    pingBackend()
+  }, [])
+
   return (
     <AuthProvider>
       <Routes>

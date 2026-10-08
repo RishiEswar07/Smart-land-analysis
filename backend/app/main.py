@@ -183,14 +183,11 @@ def create_application() -> FastAPI:
             "message": "Smart Land Analysis API is running"
         }
 
-    @app.get("/health", tags=["Health"])
-    @app.get(f"{settings.API_V1_PREFIX}/health", tags=["Health"])
+    @app.get("/health", tags=["Health"], status_code=200)
+    @app.get(f"{settings.API_V1_PREFIX}/health", tags=["Health"], status_code=200)
     async def health_check():
-        """Health check endpoint - verifies the API process is alive."""
-        return {
-            "status": "healthy",
-            "message": "Smart Land Analysis API is running",
-        }
+        """Lightweight health check endpoint - verifies the API process is alive."""
+        return {"status": "healthy"}
 
     @app.get(f"{settings.API_V1_PREFIX}/health/db", tags=["Health"])
     async def health_db_check():
