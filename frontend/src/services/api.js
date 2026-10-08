@@ -187,6 +187,7 @@ export const pingBackend = async () => {
 
 /**
  * Checks backend health status. Returns true if healthy/200 OK, false otherwise.
+ * Runs non-blocking parallel checks across candidate endpoints with short 4s timeouts.
  */
 export const checkBackendHealth = async () => {
   const primaryUrl = getHealthCheckUrl()
@@ -194,22 +195,21 @@ export const checkBackendHealth = async () => {
     primaryUrl,
     getApiBaseUrl() + '/health',
     'https://smart-land-analysis.onrender.com/health',
+    'https://smart-land-analysis.onrender.com/api/v1/health',
   ]
 
-  // Remove duplicates
-  const uniqueUrls = [...new Set(candidates)]
+  const uniqueUrls = [...new Set(candidates.filter(Boolean))]
 
-  for (const url of uniqueUrls) {
-    try {
-      const res = await axios.get(url, { timeout: 4000 })
-      if (res.status === 200) {
-        return true
-      }
-    } catch (err) {
-      // Continue to next candidate
-    }
+  try {
+    const results = await Promise.allSettled(
+      uniqueUrls.map((url) =>
+        axios.get(url, { timeout: 4000 }).then((res) => res.status === 200)
+      )
+    )
+    return results.some((r) => r.status === 'fulfilled' && r.value === true)
+  } catch (err) {
+    return false
   }
-  return false
 }
 
 export default api
