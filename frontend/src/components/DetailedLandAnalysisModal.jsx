@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react'
 import analysisService from '../services/analysisService'
 import reportService from '../services/reportService'
+import landService from '../services/landService'
+import gisService from '../services/gisService'
 import ScoreGauge from './ScoreGauge'
 import Loader from './Loader'
 
@@ -24,10 +26,17 @@ export default function DetailedLandAnalysisModal({
   const [exportingType, setExportingType] = useState(null)
   const [exportSuccess, setExportSuccess] = useState(null)
   const [showFormulaDetails, setShowFormulaDetails] = useState(false)
+  const [facilityRadius, setFacilityRadius] = useState(5.0)
+  const [customFacilities, setCustomFacilities] = useState(null)
+  const [loadingFacilities, setLoadingFacilities] = useState(false)
 
   // Fetch detailed data whenever modal opens
   useEffect(() => {
     if (!isOpen) return
+
+    setCustomFacilities(null)
+    setFacilityRadius(5.0)
+    setLoadingFacilities(false)
 
     if (analysisId) {
       setLoading(true)
@@ -69,8 +78,34 @@ export default function DetailedLandAnalysisModal({
   const rec = data?.recommendation || {}
   const areaConv = data?.area_conversions || {}
   const plotVal = data?.plot_validation || {}
-  const facilities = data?.nearby_facilities || {}
+  const facilities = customFacilities || data?.nearby_facilities || {}
   const disclaimer = data?.disclaimer || 'This analysis is a GIS-based decision-support assessment.'
+
+  const handleRadiusChange = async (radius) => {
+    if (radius === facilityRadius && (customFacilities || data?.nearby_facilities)) return
+    setFacilityRadius(radius)
+    setLoadingFacilities(true)
+    try {
+      let res = null
+      const lat = prop.latitude ?? data?.latitude
+      const lng = prop.longitude ?? data?.longitude
+      const landId = prop.land_id ?? prop.id ?? data?.land_id
+
+      if (landId) {
+        res = await landService.getNearbyFacilities(landId, radius)
+      } else if (lat != null && lng != null) {
+        res = await gisService.fetchNearbyFacilities(lat, lng, radius)
+      }
+
+      if (res) {
+        setCustomFacilities(res)
+      }
+    } catch (err) {
+      console.warn('Failed to update nearby facility radius:', err)
+    } finally {
+      setLoadingFacilities(false)
+    }
+  }
 
   const areaSqFt = areaConv.sqft ?? prop.area_sqft ?? 0
   const areaSqm = areaConv.sqm ?? (areaSqFt ? (areaSqFt / 10.7639).toFixed(1) : 0)
@@ -515,15 +550,55 @@ export default function DetailedLandAnalysisModal({
                   <span>📍</span> Nearby Essential Facilities & Geodesic Proximity
                 </h4>
                 <p className="text-[11px] text-slate-500">
-                  OpenStreetMap Overpass live queries • Geodesic straight-line distance in kilometres (km) from parcel centroid
+                  OpenStreetMap geospatial infrastructure • Geodesic straight-line distance in kilometres (km) from parcel centroid
                 </p>
               </div>
-              <span className="text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200 px-2.5 py-1 rounded-full">
-                Radius: {facilities.search_radius_km || 5.0} km • {facilities.total_facilities_found ?? facilities.total_found ?? (facilities.all_facilities?.length ?? 0)} found
-              </span>
+              <div className="flex items-center gap-2">
+                {/* Interactive Radius Toggle */}
+                <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg border border-slate-200">
+                  <span className="text-[10px] font-semibold text-slate-500 px-1.5">Radius:</span>
+                  {[5.0, 10.0].map((r) => (
+                    <button
+                      key={r}
+                      type="button"
+                      onClick={() => handleRadiusChange(r)}
+                      disabled={loadingFacilities}
+                      className={`px-2 py-0.5 text-[11px] font-bold rounded transition-colors ${
+                        facilityRadius === r
+                          ? 'bg-blue-600 text-white shadow-sm'
+                          : 'bg-white text-slate-700 hover:bg-slate-200 border border-slate-200/60'
+                      }`}
+                    >
+                      {r} km
+                    </button>
+                  ))}
+                </div>
+                <span className="text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200 px-2.5 py-1 rounded-full">
+                  {facilities.total_facilities_found ?? facilities.total_found ?? (facilities.all_facilities?.length ?? 0)} found
+                </span>
+              </div>
             </div>
 
-            {(() => {
+            {facilities?.status === 'unavailable' && !loadingFacilities && (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl mb-3 flex items-center justify-between text-xs text-amber-800">
+                <span>⚠️ OpenStreetMap live query temporarily unavailable. You can click Retry or change radius.</span>
+                <button
+                  type="button"
+                  onClick={() => handleRadiusChange(facilityRadius)}
+                  className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded font-medium text-[11px]"
+                >
+                  Retry
+                </button>
+              </div>
+            )}
+
+            {loadingFacilities ? (
+              <div className="p-8 text-center bg-slate-50 border border-slate-200 rounded-xl my-2">
+                <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
+                <p className="text-xs font-semibold text-slate-700">Querying OpenStreetMap infrastructure ({facilityRadius} km)...</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">Computing geodesic straight-line proximity</p>
+              </div>
+            ) : (() => {
               const catObj = facilities?.categories || facilities || {}
               const facilityCategories = [
                 { label: 'Bus Stands & Transit', icon: '🚌', items: catObj.bus_stands || catObj.bus_stand || [] },
@@ -537,44 +612,53 @@ export default function DetailedLandAnalysisModal({
               ]
 
               return (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                  {facilityCategories.map((cat, idx) => {
-                    const count = cat.items.length
-                    return (
-                      <div key={idx} className="bg-slate-50 border border-slate-200/80 rounded-xl p-3 flex flex-col justify-between">
-                        <div>
-                          <div className="flex items-center justify-between mb-1.5">
-                            <span className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
-                              <span>{cat.icon}</span> {cat.label}
-                            </span>
-                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${count > 0 ? 'bg-blue-100 text-blue-800' : 'bg-slate-200 text-slate-600'}`}>
-                              {count}
-                            </span>
-                          </div>
-
-                          {count === 0 ? (
-                            <p className="text-[11px] text-slate-400 italic mt-2">No records within search radius</p>
-                          ) : (
-                            <div className="space-y-1.5 mt-2">
-                              {cat.items.slice(0, 2).map((item, iIdx) => (
-                                <div key={iIdx} className="flex items-start justify-between text-[11px] gap-1">
-                                  <span className="text-slate-700 font-medium truncate" title={item.name}>
-                                    {item.name || 'Unnamed facility'}
-                                  </span>
-                                  <span className="text-blue-700 font-bold shrink-0 font-mono text-[10px]">
-                                    {(item.distance_km ?? item.distanceKm ?? 0).toFixed(2)} km
-                                  </span>
-                                </div>
-                              ))}
-                              {count > 2 && (
-                                <span className="text-[10px] text-slate-400 block">+{count - 2} more within radius</span>
-                              )}
+                <div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    {facilityCategories.map((cat, idx) => {
+                      const count = cat.items.length
+                      return (
+                        <div key={idx} className="bg-slate-50 border border-slate-200/80 rounded-xl p-3 flex flex-col justify-between">
+                          <div>
+                            <div className="flex items-center justify-between mb-1.5">
+                              <span className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                                <span>{cat.icon}</span> {cat.label}
+                              </span>
+                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${count > 0 ? 'bg-blue-100 text-blue-800' : 'bg-slate-200 text-slate-600'}`}>
+                                {count}
+                              </span>
                             </div>
-                          )}
+
+                            {count === 0 ? (
+                              <p className="text-[11px] text-slate-400 italic mt-2">No records within search radius</p>
+                            ) : (
+                              <div className="space-y-1.5 mt-2">
+                                {cat.items.slice(0, 2).map((item, iIdx) => (
+                                  <div key={iIdx} className="flex items-start justify-between text-[11px] gap-1">
+                                    <span className="text-slate-700 font-medium truncate" title={item.name}>
+                                      {item.name || 'Unnamed facility'}
+                                    </span>
+                                    <span className="text-blue-700 font-bold shrink-0 font-mono text-[10px]">
+                                      {(item.distance_km ?? item.distanceKm ?? 0).toFixed(2)} km
+                                    </span>
+                                  </div>
+                                ))}
+                                {count > 2 && (
+                                  <span className="text-[10px] text-slate-400 block">+{count - 2} more within radius</span>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    )
-                  })}
+                      )
+                    })}
+                  </div>
+                  {facilities?.source && (
+                    <div className="mt-2 text-right">
+                      <span className="text-[10px] text-slate-400">
+                        Data source: {facilities.source}
+                      </span>
+                    </div>
+                  )}
                 </div>
               )
             })()}

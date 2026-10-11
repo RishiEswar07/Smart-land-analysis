@@ -19,7 +19,9 @@ export default function FacilityCard({ icon, title, items = [], emptyLabel = 'No
           {items.map((item, idx) => (
             <li key={idx} className="flex items-center justify-between text-sm">
               <span className="text-ink truncate pr-3">{item.name}</span>
-              <span className="data-mono text-slate shrink-0">{item.distanceKm} km</span>
+              <span className="data-mono text-slate shrink-0">
+                {Number(item.distanceKm ?? item.distance_km ?? 0).toFixed(2)} km
+              </span>
             </li>
           ))}
         </ul>

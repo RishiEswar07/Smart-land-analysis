@@ -120,14 +120,14 @@ export default function Dashboard() {
           </div>
         </div>
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <FacilityCard icon="🚌" title="Bus Stands & Stops" items={facilities?.bus_stands ?? []} emptyLabel="No bus stops within radius" />
-          <FacilityCard icon="🚆" title="Railway Stations" items={facilities?.railway_stations ?? []} emptyLabel="No stations within radius" />
-          <FacilityCard icon="✈️" title="Airports" items={facilities?.airports ?? []} emptyLabel="No airports within radius" />
-          <FacilityCard icon="🏥" title="Hospitals & Clinics" items={facilities?.hospitals ?? []} emptyLabel="No hospitals within radius" />
-          <FacilityCard icon="🏫" title="Schools & Colleges" items={facilities?.schools ?? []} emptyLabel="No schools within radius" />
-          <FacilityCard icon="🛍️" title="Commercial & Shopping" items={facilities?.commercial ?? []} emptyLabel="No shops within radius" />
-          <FacilityCard icon="🛣️" title="Main Road Network" items={facilities?.roads ?? []} emptyLabel="No major highways adjacent" />
-          <FacilityCard icon="🌊" title="Water Bodies & Hydrology" items={facilities?.water_bodies ?? []} emptyLabel="No water bodies within radius" />
+          <FacilityCard icon="🚌" title="Bus Stands & Stops" items={facilities?.bus_stands ?? facilities?.categories?.bus_stands ?? []} emptyLabel="No bus stops within radius" />
+          <FacilityCard icon="🚆" title="Railway Stations" items={facilities?.railway_stations ?? facilities?.categories?.railway_stations ?? []} emptyLabel="No stations within radius" />
+          <FacilityCard icon="✈️" title="Airports" items={facilities?.airports ?? facilities?.categories?.airports ?? []} emptyLabel="No airports within radius" />
+          <FacilityCard icon="🏥" title="Hospitals & Clinics" items={facilities?.hospitals ?? facilities?.categories?.hospitals ?? []} emptyLabel="No hospitals within radius" />
+          <FacilityCard icon="🏫" title="Schools & Colleges" items={facilities?.schools ?? facilities?.categories?.schools ?? []} emptyLabel="No schools within radius" />
+          <FacilityCard icon="🛍️" title="Commercial & Shopping" items={facilities?.commercial ?? facilities?.categories?.commercial ?? []} emptyLabel="No shops within radius" />
+          <FacilityCard icon="🛣️" title="Main Road Network" items={facilities?.roads ?? facilities?.categories?.roads ?? []} emptyLabel="No major highways adjacent" />
+          <FacilityCard icon="🌊" title="Water Bodies & Hydrology" items={facilities?.water_bodies ?? facilities?.categories?.water_bodies ?? []} emptyLabel="No water bodies within radius" />
         </div>
       </div>
 
