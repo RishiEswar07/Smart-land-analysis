@@ -63,6 +63,28 @@ def generate_land_report_excel(land: Land, analysis: Analysis, details: dict) ->
     area_source = getattr(land, "area_source", "polygon") or details.get("property_info", {}).get("area_source", "polygon")
     area_source_label = "User-entered Land Area" if area_source == "direct_input" else "Area calculated from selected land boundary"
 
+    rw = getattr(land, "road_width", None) if land else None
+    if rw is None and land:
+        rw = getattr(land, "road_width_ft", None)
+    try:
+        rw_str = f"{float(rw):.0f} ft" if rw is not None else "20 ft"
+    except (ValueError, TypeError):
+        rw_str = "20 ft"
+
+    soil_raw = getattr(land, "soil_type", None) if land else None
+    soil_val = getattr(soil_raw, "value", str(soil_raw)) if soil_raw else "Loamy"
+
+    ltype_raw = getattr(land, "land_type", None) if land else None
+    land_type_val = getattr(ltype_raw, "value", str(ltype_raw)) if ltype_raw else "Residential"
+
+    water_avail = getattr(land, "water_availability", None) if land else None
+    if water_avail is None and land:
+        water_avail = getattr(land, "water_facility", False)
+
+    elec_avail = getattr(land, "electricity_availability", None) if land else None
+    if elec_avail is None and land:
+        elec_avail = getattr(land, "electricity_facility", False)
+
     prop_rows = [
         ("Land Name / Identifier", (land.land_name if land else None) or "Selected Parcel"),
         ("Address / Locality", (land.address if land else None) or "Unknown Address"),
@@ -72,11 +94,11 @@ def generate_land_report_excel(land: Land, analysis: Analysis, details: dict) ->
         ("Parcel Area (Sq.Meters)", f"{area_sqm:,.2f} m²"),
         ("Parcel Area (Cents)", f"{area_cents:,.4f} cents"),
         ("Parcel Area (Acres)", f"{area_acres:,.4f} acres"),
-        ("Road Access Width", f"{land.road_width:.0f} ft" if land and land.road_width else "20 ft"),
-        ("Soil Taxonomy", land.soil_type.value if land and hasattr(land, 'soil_type') and land.soil_type else "Loamy"),
-        ("Zoning / Land Type", land.land_type.value if land and hasattr(land, 'land_type') and land.land_type else "Residential"),
-        ("Water Utility Status", "Available" if land and land.water_availability else "Not Available"),
-        ("Electricity Utility Status", "Available" if land and land.electricity_availability else "Not Available"),
+        ("Road Access Width", rw_str),
+        ("Soil Taxonomy", soil_val),
+        ("Zoning / Land Type", land_type_val),
+        ("Water Utility Status", "Available" if bool(water_avail) else "Not Available"),
+        ("Electricity Utility Status", "Available" if bool(elec_avail) else "Not Available"),
     ]
 
     for idx, (label, val) in enumerate(prop_rows, start=5):
@@ -212,50 +234,56 @@ def generate_land_report_excel(land: Land, analysis: Analysis, details: dict) ->
         c6.font = regular_font
         c6.border = border
 
-    # 3. Construction Cost Estimate Sheet
-    ws_cost = wb.create_sheet(title="Cost Estimate")
-    ws_cost.views.sheetView[0].showGridLines = True
+    # 3. Nearby Facilities Sheet (OpenStreetMap Overpass Geodesic Distances)
+    ws_fac = wb.create_sheet(title="Nearby Facilities")
+    ws_fac.views.sheetView[0].showGridLines = True
 
-    ws_cost.merge_cells("A1:E2")
-    ws_cost["A1"] = "INDICATIVE CONSTRUCTION COST ESTIMATOR (CIVIL WORKS)"
-    ws_cost["A1"].font = title_font
-    ws_cost["A1"].fill = navy_fill
-    ws_cost["A1"].alignment = Alignment(horizontal="center", vertical="center")
+    ws_fac.merge_cells("A1:G2")
+    ws_fac["A1"] = "NEARBY INFRASTRUCTURE & ESSENTIAL FACILITIES (OPENSTREETMAP)"
+    ws_fac["A1"].font = title_font
+    ws_fac["A1"].fill = navy_fill
+    ws_fac["A1"].alignment = Alignment(horizontal="center", vertical="center")
 
-    cost_info = details.get("construction_cost") or {}
-    cost_rows = [
-        ("Target Building Type", cost_info.get("building_type", analysis.recommended_building_type if analysis else "Individual House")),
-        ("Estimated Area Basis", f"{cost_info.get('area_sqft', area_sqft):,.1f} sq.ft"),
-        ("Baseline Rate per Sq.Ft", f"₹{cost_info.get('rate_per_sqft', cost_info.get('rate_per_sqft_inr', 2000)):,.0f} / sq.ft"),
-        ("Total Estimated Cost", f"₹{cost_info.get('total_estimated_cost', cost_info.get('total_estimated_cost_inr', 0)):,.0f}"),
-        ("Material Component (55%)", f"₹{cost_info.get('material_cost', cost_info.get('material_cost_inr', 0)):,.0f}"),
-        ("Labour Component (25%)", f"₹{cost_info.get('labour_cost', cost_info.get('labour_cost_inr', 0)):,.0f}"),
-        ("Finishing & Contingency (20%)", f"₹{cost_info.get('finishing_cost', cost_info.get('finishing_cost_inr', 0)):,.0f}"),
-    ]
+    fac_headers = ["Category", "Facility Name", "Distance (km)", "Address / Locality", "Latitude", "Longitude", "Verification Status"]
+    for col_idx, h in enumerate(fac_headers, start=1):
+        cell = ws_fac.cell(row=4, column=col_idx, value=h)
+        cell.font = bold_font
+        cell.fill = light_gray_fill
+        cell.border = border
+        cell.alignment = Alignment(horizontal="center" if col_idx in (3, 5, 6) else "left")
 
-    for idx, (label, val) in enumerate(cost_rows, start=4):
-        ws_cost[f"A{idx}"] = label
-        ws_cost[f"A{idx}"].font = bold_font
-        ws_cost[f"A{idx}"].fill = light_gray_fill
-        ws_cost[f"A{idx}"].border = border
-        
-        ws_cost.merge_cells(f"B{idx}:E{idx}")
-        ws_cost[f"B{idx}"] = val
-        ws_cost[f"B{idx}"].font = bold_font if "Total" in label else regular_font
-        if "Total" in label:
-            ws_cost[f"B{idx}"].fill = light_blue_fill
-        ws_cost[f"B{idx}"].border = border
+    fac_list = details.get("nearby_facilities", {}).get("all_facilities", []) if details else []
+    if not fac_list:
+        ws_fac.merge_cells("A5:G5")
+        ws_fac["A5"] = "No facilities recorded within the queried search radius or live GIS query was offline."
+        ws_fac["A5"].font = regular_font
+        ws_fac["A5"].alignment = Alignment(horizontal="center")
+    else:
+        for r_idx, f in enumerate(fac_list, start=5):
+            d_km = f.get("distance_km") or f.get("distanceKm", 0.0)
+            row_vals = [
+                f.get("category", "General"),
+                f.get("name", "Unnamed Facility"),
+                f"{d_km:.2f}",
+                f.get("address") or "N/A",
+                f"{f.get('lat', 0.0):.5f}" if f.get("lat") else "N/A",
+                f"{f.get('lng', 0.0):.5f}" if f.get("lng") else "N/A",
+                f.get("status", "Verified (OSM)"),
+            ]
+            for col_idx, val in enumerate(row_vals, start=1):
+                c = ws_fac.cell(row=r_idx, column=col_idx, value=val)
+                c.font = bold_font if col_idx == 3 else regular_font
+                c.border = border
+                c.alignment = Alignment(horizontal="center" if col_idx in (3, 5, 6) else "left")
 
-    note_r = len(cost_rows) + 5
-    ws_cost.merge_cells(f"A{note_r}:E{note_r+2}")
-    ws_cost[f"A{note_r}"] = (
-        "Note: Construction cost estimates are purely indicative planning estimates calculated "
-        "using regional standard square-foot civil construction rates in Indian Rupees (₹). "
-        "Actual costs will vary based on architectural complexity, soil bearing capacity, "
-        "foundation engineering requirements, and fluctuating raw material commodity prices."
-    )
-    ws_cost[f"A{note_r}"].font = small_gray_font
-    ws_cost[f"A{note_r}"].alignment = Alignment(wrap_text=True, vertical="top")
+    # Column widths for Nearby Facilities
+    ws_fac.column_dimensions["A"].width = 28
+    ws_fac.column_dimensions["B"].width = 34
+    ws_fac.column_dimensions["C"].width = 16
+    ws_fac.column_dimensions["D"].width = 30
+    ws_fac.column_dimensions["E"].width = 15
+    ws_fac.column_dimensions["F"].width = 15
+    ws_fac.column_dimensions["G"].width = 24
 
     # 4. Data Quality
     ws_quality = wb.create_sheet(title="Data Quality")

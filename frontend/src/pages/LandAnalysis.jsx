@@ -13,14 +13,13 @@ import useGeolocation from '../hooks/useGeolocation'
 import landService from '../services/landService'
 import analysisService from '../services/analysisService'
 import geocodeService from '../services/geocodeService'
-import gisService, { normalizeSoilType, calculatePolygonAreaSqFt, generateEstimatedParcel } from '../services/gisService'
+import gisService, { normalizeSoilType, calculatePolygonAreaSqFt } from '../services/gisService'
 import { pingBackend } from '../services/api'
 import {
   INPUT_UNITS,
   convertAreaToSqFt,
   getAllAreaConversions,
   validatePlotFeasibility,
-  calculateConstructionCost,
   BUILDING_REQUIREMENTS,
 } from '../utils/areaUnits'
 
@@ -56,7 +55,7 @@ export default function LandAnalysis() {
   
   // Area Input Mode: 'direct' or 'polygon'
   const [areaInputMode, setAreaInputMode] = useState(savedState?.areaInputMode || 'direct')
-  const [directAreaValue, setDirectAreaValue] = useState(savedState?.directAreaValue || '2400')
+  const [directAreaValue, setDirectAreaValue] = useState(savedState?.directAreaValue || '')
   const [directAreaUnit, setDirectAreaUnit] = useState(savedState?.directAreaUnit || 'sq.ft')
 
   // Workflow Steps: type -> select -> fetching -> summary -> result
@@ -99,10 +98,16 @@ export default function LandAnalysis() {
         const sqft = convertAreaToSqFt(rawVal, directAreaUnit);
         return getAllAreaConversions(sqft);
       }
-    } else if (activeBoundary?.areaSqFt) {
+    } else if (activeBoundary?.areaSqFt && activeBoundary.areaSqFt > 0) {
       return getAllAreaConversions(activeBoundary.areaSqFt);
     }
-    return getAllAreaConversions(2400);
+    return {
+      sqft: 0,
+      sqm: 0,
+      cents: 0,
+      acres: 0,
+      formatted_display: '0 sq.ft'
+    };
   }, [areaInputMode, directAreaValue, directAreaUnit, activeBoundary]);
 
   // Current calculated sq.ft value
@@ -174,6 +179,19 @@ export default function LandAnalysis() {
         setError("Please enter a valid positive land area greater than 0.");
         return;
       }
+    } else {
+      // Polygon mode: require boundary or verified cadastral parcel
+      if (!activeBoundary?.areaSqFt || activeBoundary.areaSqFt <= 0) {
+        const lat = clickedLocation?.lat;
+        const lng = clickedLocation?.lng;
+        const parcel = await gisService.fetchParcelData(lat, lng).catch(() => null);
+        if (!parcel || !parcel.available || !parcel.areaSqFt) {
+          setError(
+            `Location selected at (${lat?.toFixed(5)}, ${lng?.toFixed(5)}). Please draw your land parcel boundary polygon on the map (at least 3 vertices), or switch to 'Enter Area Directly' if you already know the plot area.`
+          );
+          return;
+        }
+      }
     }
 
     setStep('fetching')
@@ -192,31 +210,39 @@ export default function LandAnalysis() {
         gisService.fetchLandCover(lat, lng).catch(() => ({ available: false }))
       ]);
 
-      let finalSqFt = 2400;
-      let rawArea = 2400;
+      let finalSqFt = null;
+      let rawArea = null;
       let inputUnit = 'sq.ft';
       let areaSource = 'direct_input';
       let boundaryGeoJson = null;
 
       if (areaInputMode === 'direct') {
-        rawArea = parseFloat(directAreaValue) || 2400;
+        rawArea = parseFloat(directAreaValue);
         inputUnit = directAreaUnit || 'sq.ft';
         finalSqFt = convertAreaToSqFt(rawArea, inputUnit);
         areaSource = 'direct_input';
         boundaryGeoJson = null; // No fake polygon for direct input
       } else {
         if (activeBoundary?.areaSqFt && activeBoundary.areaSqFt > 0) {
-          finalSqFt = Math.round(activeBoundary.areaSqFt);
+          finalSqFt = Math.round(activeBoundary.areaSqFt * 10) / 10;
+          rawArea = finalSqFt;
           boundaryGeoJson = activeBoundary.geojson;
+          areaSource = 'polygon';
         } else {
-          // If polygon mode was selected but user only clicked a point, compute estimated parcel
-          const parcel = await gisService.fetchParcelData(lat, lng);
-          finalSqFt = Math.round(parcel.areaSqFt);
-          boundaryGeoJson = parcel.geojson;
+          const parcel = await gisService.fetchParcelData(lat, lng).catch(() => null);
+          if (parcel?.available && parcel?.areaSqFt) {
+            finalSqFt = Math.round(parcel.areaSqFt * 10) / 10;
+            rawArea = finalSqFt;
+            boundaryGeoJson = parcel.geojson;
+            areaSource = 'polygon';
+          }
         }
-        rawArea = finalSqFt;
-        inputUnit = 'sq.ft';
-        areaSource = 'polygon';
+      }
+
+      if (!finalSqFt || finalSqFt <= 0) {
+        setError("Unable to determine parcel area. Please draw a boundary polygon or enter area directly.");
+        setStep('select');
+        return;
       }
 
       setManualArea(String(finalSqFt));
@@ -256,13 +282,15 @@ export default function LandAnalysis() {
 
     if (!finalSqFt || isNaN(Number(finalSqFt)) || Number(finalSqFt) <= 0) {
       if (manualArea) {
-        finalSqFt = parseFloat(String(manualArea).replace(/,/g, '').trim()) || 2400;
+        finalSqFt = parseFloat(String(manualArea).replace(/,/g, '').trim());
         rawArea = finalSqFt;
         inputUnit = 'sq.ft';
-      } else {
-        finalSqFt = 2400;
-        rawArea = 2400;
       }
+    }
+
+    if (!finalSqFt || isNaN(Number(finalSqFt)) || Number(finalSqFt) <= 0) {
+      setError("Please provide a valid land area greater than 0 before running the analysis.");
+      return;
     }
 
     setSubmitting(true)
@@ -308,7 +336,7 @@ export default function LandAnalysis() {
     setResult(null)
     setError(null)
     setManualArea('')
-    setDirectAreaValue('2400')
+    setDirectAreaValue('')
     setDirectAreaUnit('sq.ft')
     setAreaInputMode('direct')
     setStep('type')
@@ -515,7 +543,7 @@ export default function LandAnalysis() {
                       step="any"
                       value={directAreaValue}
                       onChange={(e) => setDirectAreaValue(e.target.value)}
-                      placeholder="e.g. 2400"
+                      placeholder="e.g. 1500, 2400, 5000..."
                       className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     />
                   </div>
@@ -671,10 +699,10 @@ export default function LandAnalysis() {
                 </div>
                 <div className="text-right">
                   <span className="text-sm font-black text-blue-600 block">
-                    {Math.round(gisData.area_sqft || manualArea || 2400).toLocaleString()} sq.ft
+                    {gisData.area_sqft ? Math.round(gisData.area_sqft).toLocaleString() : (manualArea ? Math.round(parseFloat(manualArea)).toLocaleString() : 'N/A')} sq.ft
                   </span>
                   <span className="text-[11px] text-slate-500 font-medium block">
-                    {((gisData.area_sqft || 2400) / 10.7639).toFixed(1)} m² · {((gisData.area_sqft || 2400) / 435.6).toFixed(2)} cents · {((gisData.area_sqft || 2400) / 43560).toFixed(4)} acres
+                    {gisData.area_sqft ? ((gisData.area_sqft) / 10.7639).toFixed(1) : 0} m² · {gisData.area_sqft ? ((gisData.area_sqft) / 435.6).toFixed(2) : 0} cents · {gisData.area_sqft ? ((gisData.area_sqft) / 43560).toFixed(4) : 0} acres
                   </span>
                   <span className="inline-block text-[10px] font-semibold text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-full mt-0.5">
                     {gisData.area_source === 'direct_input' ? `Direct Input (${gisData.area || gisData.area_sqft} ${gisData.input_unit || 'sq.ft'})` : 'Polygon Boundary'}
@@ -761,7 +789,7 @@ export default function LandAnalysis() {
                       }
                     }}
                     className="w-full px-3 py-2 border border-slate-300 rounded focus:border-blue-500 text-sm font-medium bg-white"
-                    placeholder="e.g. 2400"
+                    placeholder="e.g. 1500, 5000..."
                   />
                 </div>
                 <div className="flex-1 flex items-end">
@@ -825,7 +853,7 @@ export default function LandAnalysis() {
                   <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
                     <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                   </svg>
-                  Area meets building requirements ({Math.round(gisData.area_sqft || manualArea || 2400).toLocaleString()} sq.ft)
+                  Area meets building requirements ({Math.round(gisData.area_sqft || manualArea || 0).toLocaleString()} sq.ft)
                 </p>
               )}
             </div>
@@ -953,7 +981,7 @@ export default function LandAnalysis() {
 
                 <div className="h-[600px] w-full rounded-xl overflow-hidden shadow-card border border-slate-200">
                   <House3DModel 
-                    landAreaSqFt={gisData.area_sqft || (manualArea ? parseFloat(manualArea) : 2400)} 
+                    landAreaSqFt={gisData.area_sqft || (manualArea ? parseFloat(manualArea) : 1000)} 
                     buildingType={feasibility.suitable ? selectedBuildingType : (feasibility.rec || 'Residential House')}
                   />
                 </div>

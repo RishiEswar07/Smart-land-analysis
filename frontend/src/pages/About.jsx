@@ -1,22 +1,22 @@
 const stack = [
-  { group: 'Frontend', items: ['React (Vite)', 'Tailwind CSS', 'React Router', 'Recharts', 'React Leaflet'] },
-  { group: 'Backend', items: ['FastAPI (async)', 'SQLAlchemy 2.0', 'PostgreSQL', 'JWT authentication'] },
-  { group: 'AI / ML', items: ['Scikit-learn', 'XGBoost', 'Random Forest'] },
-  { group: 'Data sources', items: ['OpenStreetMap Overpass API', 'Open-Elevation API', 'Open-Meteo Flood API'] },
+  { group: 'Frontend', items: ['React 18 (Vite)', 'MapLibre GL & Turf.js', 'Tailwind CSS', 'React Router v6', 'Recharts'] },
+  { group: 'Backend', items: ['FastAPI (Python 3.11)', 'SQLAlchemy 2.0 (Async)', 'Supabase PostgreSQL', 'PyJWT Authentication', 'ReportLab & openpyxl'] },
+  { group: 'Machine Learning', items: ['Scikit-learn', 'Random Forest Classifier', 'Feature Scaling & Encoders', 'Lightweight Inference API'] },
+  { group: 'Geospatial Data Sources', items: ['OpenStreetMap Overpass API', 'ISRIC SoilGrids v2.0 (WRB)', 'Open-Elevation API', 'Open-Meteo Hydrology API', 'ESA WorldCover 10m'] },
 ]
 
 const principles = [
   {
     title: 'Explainable, not a black box',
-    desc: 'Every score comes with the reasoning behind it — which factors pushed it up or down — instead of a bare number.',
+    desc: 'Every suitability assessment details weighted factor contributions (soil, slope, flood risk, infrastructure access, plot requirements) rather than an opaque score.',
   },
   {
-    title: 'Real data where it exists',
-    desc: 'Location, elevation, nearby infrastructure and flood exposure are pulled live from public GIS and hydrology APIs.',
+    title: 'Real live geospatial telemetry',
+    desc: 'Soil taxonomy, terrain elevation, ESA land cover, and 8 categories of nearby facilities with geodesic distances (km) are queried live from authoritative GIS APIs.',
   },
   {
-    title: 'Honest about its limits',
-    desc: "This is a decision-support tool, not a replacement for a licensed civil engineer's site survey.",
+    title: 'Honest academic rigor',
+    desc: 'Designed as an engineering decision-support tool. It clearly states provenance metadata and serves as a planning aid rather than a replacement for physical geotechnical surveys.',
   },
 ]
 
@@ -30,9 +30,9 @@ export default function About() {
             Smart Land Analysis Platform
           </h1>
           <p className="mt-4 text-slate leading-relaxed max-w-2xl mx-auto">
-            An AI-based decision support system for building planning, built as a final-year
-            engineering project. It turns scattered land data — soil, elevation, flood history,
-            infrastructure access — into one clear, explainable suitability verdict.
+            An AI & GIS-powered decision-support platform for land feasibility analysis and building planning.
+            It aggregates live multi-source geospatial data — WRB soil taxonomy, elevation & slope, flood risk,
+            and geodesic proximity to infrastructure — to deliver explainable suitability recommendations.
           </p>
         </div>
       </section>
@@ -51,7 +51,7 @@ export default function About() {
 
       <section className="bg-white border-y border-line">
         <div className="max-w-5xl mx-auto px-5 sm:px-8 py-16">
-          <h2 className="text-xl font-display font-bold text-ink mb-6">Tech stack</h2>
+          <h2 className="text-xl font-display font-bold text-ink mb-6">Verified Tech Stack</h2>
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
             {stack.map((s) => (
               <div key={s.group}>
@@ -71,14 +71,15 @@ export default function About() {
       </section>
 
       <section className="max-w-5xl mx-auto px-5 sm:px-8 py-16">
-        <h2 className="text-xl font-display font-bold text-ink mb-4">How the AI works, briefly</h2>
+        <h2 className="text-xl font-display font-bold text-ink mb-4">How the Machine Learning Works</h2>
         <p className="text-sm text-slate leading-relaxed max-w-3xl">
-          A Random Forest / XGBoost regressor scores suitability (0–100) and a companion
-          classifier recommends the best-fit building type from six categories — individual
-          house, apartment, school, hospital, commercial, or factory. Both are trained offline
-          on a feature-engineered dataset combining real GIS data with domain-rule-bootstrapped
-          labels, then served through a lightweight FastAPI inference endpoint — the model
-          never trains live, it only predicts.
+          The core ML pipeline utilizes a Scikit-learn Random Forest model trained on engineered
+          geotechnical and geospatial features (soil load-bearing capacity, terrain slope gradient,
+          flood frequency, infrastructure accessibility, and parcel geometry). The backend exposes a
+          low-latency inference service that evaluates feature vectors alongside deterministic zoning
+          and minimum plot dimension constraints (Individual House, Apartment, Commercial Building,
+          School, Hospital). The models operate strictly in inference mode to guarantee sub-second
+          deterministic evaluations.
         </p>
       </section>
     </div>

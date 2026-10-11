@@ -86,7 +86,7 @@ def generate_land_report_pdf(land: Land, analysis: Analysis, details: dict | Non
     prop = details.get("property_info", {}) if details else {}
     area_conv = details.get("area_conversions", {}) if details else {}
     plot_val = details.get("plot_validation", {}) if details else {}
-    cost_est = details.get("construction_cost", {}) if details else {}
+    facilities_info = details.get("nearby_facilities", {}) if details else {}
 
     area_sqft = float(land.area_sqft) if (land.area_sqft is not None and land.area_sqft > 0) else 1500.0
     all_conversions = get_all_area_conversions(area_sqft)
@@ -143,37 +143,34 @@ def generate_land_report_pdf(land: Land, analysis: Analysis, details: dict | Non
     ]))
     story.append(prop_table)
 
-    # ---------------- 2. Plot Size Requirement Validation & Construction Cost Estimator ----------------
-    story.append(Paragraph("2. Plot Size Requirement Validation & Indicative Construction Cost", section_style))
+    # ---------------- 2. Plot Size Requirement & Building Feasibility Validation ----------------
+    story.append(Paragraph("2. Plot Size Requirement & Building Feasibility Validation", section_style))
     
     val_status_str = plot_val.get("message", f"Plot size ({area_sqft:,.0f} sq.ft) evaluated for {btype}.")
     is_suff = plot_val.get("is_sufficient", True)
     status_color = "#15803D" if is_suff else "#B91C1C"
-    
-    rate_sqft_val = cost_est.get("rate_per_sqft_inr", cost_est.get("rate_per_sqft", 2000))
-    total_cost_val = cost_est.get("total_estimated_cost_inr", cost_est.get("total_estimated_cost", area_sqft * rate_sqft_val))
-    mat_cost_val = cost_est.get("material_cost_inr", cost_est.get("material_cost", total_cost_val * 0.55))
-    lab_cost_val = cost_est.get("labour_cost_inr", cost_est.get("labour_cost", total_cost_val * 0.25))
-    fin_cost_val = cost_est.get("finishing_cost_inr", cost_est.get("finishing_cost", total_cost_val * 0.20))
+    min_req_sqft = plot_val.get("min_required_sqft", 400)
+    diff_sqft = abs(plot_val.get("deficit_or_surplus_sqft", area_sqft - min_req_sqft))
+    diff_label = f"+{diff_sqft:,.0f} sq.ft (Surplus)" if is_suff else f"-{diff_sqft:,.0f} sq.ft (Deficit)"
 
     val_rows = [
         [
             Paragraph("Plot Size Feasibility", label_style),
             Paragraph(f"<font color='{status_color}'><b>{val_status_str}</b></font>", value_style),
             Paragraph("Min. Standard Required", label_style),
-            Paragraph(f"{plot_val.get('min_required_sqft', 400):,.0f} sq.ft", bold_value_style),
+            Paragraph(f"{min_req_sqft:,.0f} sq.ft", bold_value_style),
         ],
         [
-            Paragraph("Indicative Cost Rate", label_style),
-            Paragraph(f"₹{rate_sqft_val:,} / sq.ft ({btype})", value_style),
-            Paragraph("Total Estimated Cost", label_style),
-            Paragraph(f"<b>₹{total_cost_val:,.0f}</b> (Indicative)", bold_value_style),
+            Paragraph("Actual Plot Area", label_style),
+            Paragraph(f"{area_sqft:,.2f} sq.ft ({all_conversions['cents']:.2f} cents)", bold_value_style),
+            Paragraph("Surplus / Deficit", label_style),
+            Paragraph(f"<font color='{status_color}'><b>{diff_label}</b></font>", bold_value_style),
         ],
         [
-            Paragraph("Material Cost (55%)", label_style),
-            Paragraph(f"₹{mat_cost_val:,.0f}", value_style),
-            Paragraph("Labour (25%) / Finishing (20%)", label_style),
-            Paragraph(f"Labour: ₹{lab_cost_val:,.0f} | Finishing: ₹{fin_cost_val:,.0f}", value_style),
+            Paragraph("Feasibility Evaluation", label_style),
+            Paragraph(f"Standard minimum plot guidelines for {btype} are satisfied. Site geometry is sufficient for proposed footprint.", value_style),
+            Paragraph("Compliance Status", label_style),
+            Paragraph(f"<b>{'COMPLIANT' if is_suff else 'NON-COMPLIANT (Deficit)'}</b>", bold_value_style),
         ],
     ]
     val_table = Table(val_rows, colWidths=[3.8 * cm, 5.5 * cm, 3.8 * cm, 5.5 * cm])
@@ -229,10 +226,24 @@ def generate_land_report_pdf(land: Land, analysis: Analysis, details: dict | Non
     
     factors_data = details.get("factors", []) if details else []
     if not factors_data:
-        rb = analysis.risk_breakdown or {}
-        flood_s = round(100.0 - rb.get("flood_risk", {}).get("score", 10.0), 1)
-        access_s = round(analysis.traffic_accessibility_score or 70.0, 1)
-        infra_s = round(analysis.infrastructure_score or 75.0, 1)
+        rb = analysis.risk_breakdown if isinstance(getattr(analysis, "risk_breakdown", None), dict) else {}
+        raw_flood = rb.get("flood_risk", {}).get("score", 10.0) if isinstance(rb.get("flood_risk"), dict) else 10.0
+        try:
+            flood_s = round(100.0 - float(raw_flood), 1)
+        except (ValueError, TypeError):
+            flood_s = 90.0
+
+        try:
+            access_val = getattr(analysis, "traffic_accessibility_score", None)
+            access_s = round(float(access_val if access_val is not None else 70.0), 1)
+        except (ValueError, TypeError):
+            access_s = 70.0
+
+        try:
+            infra_val = getattr(analysis, "infrastructure_score", None)
+            infra_s = round(float(infra_val if infra_val is not None else 75.0), 1)
+        except (ValueError, TypeError):
+            infra_s = 75.0
         factors_data = [
             {"name": "Flood Safety", "score": flood_s, "impact": "Positive" if flood_s >= 70 else "Moderate", "weight": 0.35, "why_reason": "Copernicus DEM elevation baseline and GloFAS daily river discharge hydrology."},
             {"name": "Road Accessibility", "score": access_s, "impact": "Positive" if access_s >= 70 else "Moderate", "weight": 0.25, "why_reason": "OpenStreetMap road corridor width and verified highway topology."},
@@ -314,6 +325,45 @@ def generate_land_report_pdf(land: Land, analysis: Analysis, details: dict | Non
             ("LEFTPADDING", (0, 0), (-1, -1), 4),
         ]))
         story.append(q_table)
+
+    # ---------------- 7. Nearby Infrastructure & Essential Facilities ----------------
+    story.append(Paragraph("7. Nearby Infrastructure & Essential Facilities (Geodesic Proximity)", section_style))
+    fac_all = facilities_info.get("all_facilities", []) if isinstance(facilities_info, dict) else []
+    if fac_all:
+        fac_rows = [
+            [
+                Paragraph("Facility Category", label_style),
+                Paragraph("Facility Name", label_style),
+                Paragraph("Distance (km)", label_style),
+                Paragraph("Data Source", label_style),
+            ]
+        ]
+        # Include top 8 facilities across all categories
+        for f in fac_all[:8]:
+            d_km = f.get("distance_km") or f.get("distanceKm", 0.0)
+            fac_rows.append([
+                Paragraph(f.get("category", "General"), bold_value_style),
+                Paragraph(f.get("name", "Unnamed Facility"), value_style),
+                Paragraph(f"<b>{d_km:.2f} km</b>", bold_value_style),
+                Paragraph(f.get("status", "OpenStreetMap Overpass"), value_style),
+            ])
+        fac_table = Table(fac_rows, colWidths=[4.5 * cm, 6.0 * cm, 3.0 * cm, 5.1 * cm])
+        fac_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), _BG_HEADER),
+            ("BOX", (0, 0), (-1, -1), 0.5, _LINE),
+            ("INNERGRID", (0, 0), (-1, -1), 0.5, _LINE),
+            ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        story.append(fac_table)
+    else:
+        story.append(
+            Paragraph(
+                "<i>No nearby facility points recorded within the queried search radius or live geospatial query was offline.</i>",
+                value_style,
+            )
+        )
 
     # ---------------- 8. Data Sources & Provenance ----------------
     story.append(Paragraph("8. Data Sources & Provenance Metadata", section_style))

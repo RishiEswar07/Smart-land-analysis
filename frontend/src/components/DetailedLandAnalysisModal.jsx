@@ -69,7 +69,7 @@ export default function DetailedLandAnalysisModal({
   const rec = data?.recommendation || {}
   const areaConv = data?.area_conversions || {}
   const plotVal = data?.plot_validation || {}
-  const cost = data?.construction_cost || {}
+  const facilities = data?.nearby_facilities || {}
   const disclaimer = data?.disclaimer || 'This analysis is a GIS-based decision-support assessment.'
 
   const areaSqFt = areaConv.sqft ?? prop.area_sqft ?? 0
@@ -278,8 +278,8 @@ export default function DetailedLandAnalysisModal({
             )}
           </div>
 
-          {/* Section 1.5: Plot Size Validation & Indicative Construction Cost */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Section 1.5: Plot Size Validation */}
+          <div className="w-full">
             {/* Plot Size Validation Card */}
             <div className={`p-4 rounded-xl border ${plotVal.is_valid !== false && plotVal.is_sufficient !== false ? 'bg-emerald-50/60 border-emerald-200' : 'bg-rose-50/60 border-rose-200'}`}>
               <div className="flex items-center justify-between mb-2">
@@ -294,63 +294,25 @@ export default function DetailedLandAnalysisModal({
                   {plotVal.status || (plotVal.is_valid !== false ? 'SUITABLE' : 'DEFICIT')}
                 </span>
               </div>
-              <div className="text-xs text-slate-700 space-y-1">
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Minimum Required Area:</span>
-                  <span className="font-bold">{Number(plotVal.min_required_sqft || plotVal.required_min_sqft || 400).toLocaleString()} sq.ft</span>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs text-slate-700 mt-2">
+                <div className="bg-white/80 p-2.5 rounded-lg border border-slate-200/60">
+                  <span className="text-slate-500 block text-[11px]">Minimum Required Area:</span>
+                  <span className="font-bold text-slate-800 text-sm">{Number(plotVal.min_required_sqft || plotVal.required_min_sqft || 400).toLocaleString()} sq.ft</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Actual Parcel Area:</span>
-                  <span className="font-bold">{Number(plotVal.actual_sqft || areaSqFt).toLocaleString()} sq.ft</span>
+                <div className="bg-white/80 p-2.5 rounded-lg border border-slate-200/60">
+                  <span className="text-slate-500 block text-[11px]">Actual Parcel Area:</span>
+                  <span className="font-bold text-slate-800 text-sm">{Number(plotVal.actual_sqft || areaSqFt).toLocaleString()} sq.ft</span>
                 </div>
-                <div className="flex justify-between pt-1 border-t border-slate-200/60 font-semibold">
-                  <span className="text-slate-600">Surplus / Deficit:</span>
-                  <span className={plotVal.is_valid !== false && plotVal.is_sufficient !== false ? 'text-emerald-700' : 'text-rose-700'}>
+                <div className="bg-white/80 p-2.5 rounded-lg border border-slate-200/60">
+                  <span className="text-slate-500 block text-[11px]">Surplus / Deficit:</span>
+                  <span className={`font-bold text-sm ${plotVal.is_valid !== false && plotVal.is_sufficient !== false ? 'text-emerald-700' : 'text-rose-700'}`}>
                     {plotVal.is_valid !== false && plotVal.is_sufficient !== false ? '+' : '-'}{Number(plotVal.deficit_or_surplus_sqft || 0).toLocaleString()} sq.ft
                   </span>
                 </div>
-                <p className="text-[11px] text-slate-600 pt-1 leading-snug">
-                  {plotVal.message || 'Plot area meets minimum regulatory size guidelines.'}
-                </p>
               </div>
-            </div>
-
-            {/* Indicative Construction Cost Card */}
-            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-                  <span>🏗️</span> Construction Cost Estimator
-                </span>
-                <span className="text-xs font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
-                  ₹{Number(cost.rate_per_sqft || cost.rate_per_sqft_inr || 2000).toLocaleString()}/sq.ft
-                </span>
-              </div>
-              <div className="text-xs space-y-1.5">
-                <div className="flex justify-between items-baseline">
-                  <span className="text-slate-500">Total Estimated Cost:</span>
-                  <span className="text-base font-black text-slate-900">
-                    ₹{Number(cost.total_estimated_cost || cost.total_estimated_cost_inr || (areaSqFt * 2000)).toLocaleString()}
-                  </span>
-                </div>
-                {/* Cost Breakdown Bars */}
-                <div className="grid grid-cols-3 gap-1.5 text-[10px] pt-1">
-                  <div className="bg-white p-1.5 rounded border border-slate-200">
-                    <span className="text-slate-400 block">Material (55%)</span>
-                    <strong className="text-slate-800">₹{Number(cost.material_cost || cost.material_cost_inr || (areaSqFt * 2000 * 0.55)).toLocaleString()}</strong>
-                  </div>
-                  <div className="bg-white p-1.5 rounded border border-slate-200">
-                    <span className="text-slate-400 block">Labour (25%)</span>
-                    <strong className="text-slate-800">₹{Number(cost.labour_cost || cost.labour_cost_inr || (areaSqFt * 2000 * 0.25)).toLocaleString()}</strong>
-                  </div>
-                  <div className="bg-white p-1.5 rounded border border-slate-200">
-                    <span className="text-slate-400 block">Finishing (20%)</span>
-                    <strong className="text-slate-800">₹{Number(cost.finishing_cost || cost.finishing_cost_inr || (areaSqFt * 2000 * 0.20)).toLocaleString()}</strong>
-                  </div>
-                </div>
-                <p className="text-[10px] text-slate-400 pt-0.5 leading-tight">
-                  *Indicative civil estimate in Indian Rupees (₹).
-                </p>
-              </div>
+              <p className="text-[11px] text-slate-600 pt-2 leading-snug">
+                {plotVal.message || 'Plot area meets minimum regulatory size guidelines.'}
+              </p>
             </div>
           </div>
 
@@ -545,7 +507,80 @@ export default function DetailedLandAnalysisModal({
             </div>
           </div>
 
-          {/* Section 6: Historical Change Status */}
+          {/* Section 6: Nearby Essential Facilities & Geodesic Proximity */}
+          <div>
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+              <div>
+                <h4 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+                  <span>📍</span> Nearby Essential Facilities & Geodesic Proximity
+                </h4>
+                <p className="text-[11px] text-slate-500">
+                  OpenStreetMap Overpass live queries • Geodesic straight-line distance in kilometres (km) from parcel centroid
+                </p>
+              </div>
+              <span className="text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200 px-2.5 py-1 rounded-full">
+                Radius: {facilities.search_radius_km || 5.0} km • {facilities.total_facilities_found ?? facilities.total_found ?? (facilities.all_facilities?.length ?? 0)} found
+              </span>
+            </div>
+
+            {(() => {
+              const catObj = facilities?.categories || facilities || {}
+              const facilityCategories = [
+                { label: 'Bus Stands & Transit', icon: '🚌', items: catObj.bus_stands || catObj.bus_stand || [] },
+                { label: 'Railway Stations', icon: '🚆', items: catObj.railway_stations || catObj.railway_station || [] },
+                { label: 'Airports', icon: '✈️', items: catObj.airports || catObj.airport || [] },
+                { label: 'Hospitals & Medical', icon: '🏥', items: catObj.hospitals || catObj.hospital || [] },
+                { label: 'Schools & Colleges', icon: '🏫', items: catObj.schools || catObj.school_college || [] },
+                { label: 'Commercial & Shopping', icon: '🛍️', items: catObj.commercial || catObj.shopping_commercial || [] },
+                { label: 'Main Roads & Access', icon: '🛣️', items: catObj.roads || catObj.main_roads || [] },
+                { label: 'Water Bodies & Hydrology', icon: '🌊', items: catObj.water_bodies || [] },
+              ]
+
+              return (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  {facilityCategories.map((cat, idx) => {
+                    const count = cat.items.length
+                    return (
+                      <div key={idx} className="bg-slate-50 border border-slate-200/80 rounded-xl p-3 flex flex-col justify-between">
+                        <div>
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                              <span>{cat.icon}</span> {cat.label}
+                            </span>
+                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${count > 0 ? 'bg-blue-100 text-blue-800' : 'bg-slate-200 text-slate-600'}`}>
+                              {count}
+                            </span>
+                          </div>
+
+                          {count === 0 ? (
+                            <p className="text-[11px] text-slate-400 italic mt-2">No records within search radius</p>
+                          ) : (
+                            <div className="space-y-1.5 mt-2">
+                              {cat.items.slice(0, 2).map((item, iIdx) => (
+                                <div key={iIdx} className="flex items-start justify-between text-[11px] gap-1">
+                                  <span className="text-slate-700 font-medium truncate" title={item.name}>
+                                    {item.name || 'Unnamed facility'}
+                                  </span>
+                                  <span className="text-blue-700 font-bold shrink-0 font-mono text-[10px]">
+                                    {(item.distance_km ?? item.distanceKm ?? 0).toFixed(2)} km
+                                  </span>
+                                </div>
+                              ))}
+                              {count > 2 && (
+                                <span className="text-[10px] text-slate-400 block">+{count - 2} more within radius</span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })()}
+          </div>
+
+          {/* Section 7: Historical Change Status */}
           <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs">
             <div className="flex items-center gap-2 font-bold text-slate-700 mb-1">
               <svg className="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -561,7 +596,7 @@ export default function DetailedLandAnalysisModal({
             </p>
           </div>
 
-          {/* Section 7: Regulatory Notice & Disclaimer */}
+          {/* Section 8: Regulatory Notice & Disclaimer */}
           <div className="bg-amber-50/60 border border-amber-200/80 rounded-xl p-4 text-xs text-amber-900 leading-relaxed">
             <strong className="text-amber-800 block mb-1 font-bold">Official Regulatory Notice & Disclaimer:</strong>
             {disclaimer}

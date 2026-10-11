@@ -158,28 +158,3 @@ export function validatePlotFeasibility(areaSqFt, buildingType = 'Individual Hou
   };
 }
 
-/**
- * Calculates indicative construction cost breakdown.
- */
-export function calculateConstructionCost(areaSqFt, buildingType = 'Individual House') {
-  const btype = buildingType || 'Individual House';
-  const rule = BUILDING_REQUIREMENTS[btype] || BUILDING_REQUIREMENTS['Individual House'];
-  const actualSqFt = Math.max(0, parseFloat(areaSqFt) || 0);
-  const ratePerSqFt = rule.rateInr;
-
-  const totalEstimatedCost = Math.round(actualSqFt * ratePerSqFt);
-  const materialCost = Math.round(totalEstimatedCost * 0.55);
-  const labourCost = Math.round(totalEstimatedCost * 0.25);
-  const finishingCost = Math.round(totalEstimatedCost * 0.20);
-
-  return {
-    buildingType: btype,
-    areaSqFt: actualSqFt,
-    ratePerSqFt,
-    totalEstimatedCost,
-    materialCost,
-    labourCost,
-    finishingCost,
-    disclaimer: 'This is an indicative estimate, not an official quotation or government-approved construction rate.',
-  };
-}

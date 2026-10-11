@@ -23,10 +23,10 @@ from app.models.land import Land, LandType, SoilType
 from app.services.exceptions import NotFoundError
 from app.services.soil_service import fetch_soilgrids_data
 from app.services.landcover_service import get_land_cover, LandCoverLookupError
+from app.services.facility_service import fetch_nearby_facilities
 from app.utils.area_units import (
     get_all_area_conversions,
     validate_building_plot_feasibility,
-    calculate_indicative_construction_cost,
     BUILDING_RULES,
 )
 
@@ -448,7 +448,7 @@ def build_detailed_analysis_dict(land: Land, analysis: Analysis) -> dict:
     Constructs a comprehensive, transparent detailed analysis payload
     containing factor scores with dynamic 'Why?' explanations,
     4-unit area conversions (m², sqft, cents, acres), area source provenance,
-    plot size validation, indicative construction cost estimator, data quality,
+    plot size validation, nearby facilities with geodesic distances, data quality,
     data sources provenance, and regulatory disclaimers.
     """
     # 1. Extract raw risk scores from stored analysis breakdown
@@ -499,10 +499,7 @@ def build_detailed_analysis_dict(land: Land, analysis: Analysis) -> dict:
     btype = analysis.recommended_building_type or "Residential House"
     plot_validation = validate_building_plot_feasibility(area_sqft, btype)
 
-    # 5. Indicative Construction Cost Estimation
-    construction_cost = calculate_indicative_construction_cost(area_sqft, btype)
-
-    # 6. Scientific Data Quality & Completeness Indicators
+    # 5. Scientific Data Quality & Completeness Indicators
     quality_items = [
         {
             "category": "Location & Coordinates",
@@ -788,7 +785,7 @@ def build_detailed_analysis_dict(land: Land, analysis: Analysis) -> dict:
             "source_description": source_desc,
         },
         "plot_validation": plot_validation,
-        "construction_cost": construction_cost,
+        "nearby_facilities": getattr(land, "facilities_cache", {}) or {},
         "suitability": {
             "score": analysis.suitability_score,
             "rating": "High Suitability" if analysis.suitability_score >= 75.0 else ("Moderate Suitability" if analysis.suitability_score >= 50.0 else "Low Suitability"),
@@ -846,4 +843,14 @@ async def get_detailed_analysis_by_id(db: AsyncSession, analysis_id: uuid.UUID, 
     if row is None:
         raise NotFoundError(entity="Analysis", identifier=str(analysis_id))
     analysis, land = row
-    return build_detailed_analysis_dict(land, analysis)
+    details = build_detailed_analysis_dict(land, analysis)
+
+    # Attach live or cached nearby facilities from OpenStreetMap Overpass
+    if land.latitude is not None and land.longitude is not None:
+        try:
+            fac = await fetch_nearby_facilities(land.latitude, land.longitude, radius_km=5.0)
+            details["nearby_facilities"] = fac
+        except Exception as exc:
+            logger.warning(f"Could not load nearby facilities: {exc}")
+
+    return details

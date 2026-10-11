@@ -1,8 +1,7 @@
 """
 utils/area_units.py
 -------------------
-Centralized area conversion, unit normalization, building requirements,
-and indicative construction cost estimation.
+Centralized area conversion, unit normalization, and building plot feasibility validation.
 
 Conversion Factors:
 - 1 sq.m  = 10.7639 sq.ft
@@ -180,36 +179,6 @@ def validate_building_plot_feasibility(area_sqft: float, building_type: str) -> 
     }
 
 
-def calculate_indicative_construction_cost(area_sqft: float, building_type: str) -> Dict[str, Any]:
-    """
-    Calculates the indicative construction cost based on normalized area.
-    Formula: Estimated Construction Cost = Land Area (sq.ft) * Building Type Rate
-    """
-    btype = building_type or "Individual House"
-    rule = BUILDING_RULES.get(btype, BUILDING_RULES.get("Individual House", {"min_sqft": 400.0, "rate_inr_sqft": 2000}))
-    rate_sqft = rule["rate_inr_sqft"]
-    actual_sqft = max(0.0, float(area_sqft))
-    
-    est_total_cost = round(actual_sqft * rate_sqft, 2)
-    mat_cost = round(est_total_cost * 0.55, 2)
-    lab_cost = round(est_total_cost * 0.25, 2)
-    oth_cost = round(est_total_cost * 0.20, 2)
+# Convenience alias for consistent naming
+validate_plot_requirements = validate_building_plot_feasibility
 
-    return {
-        "building_type": btype,
-        "area_sqft": actual_sqft,
-        "rate_per_sqft": rate_sqft,
-        "rate_per_sqft_inr": rate_sqft,
-        "total_estimated_cost": est_total_cost,
-        "total_estimated_cost_inr": est_total_cost,
-        "material_cost": mat_cost,
-        "material_cost_inr": mat_cost,
-        "material_pct": 55,
-        "labour_cost": lab_cost,
-        "labour_cost_inr": lab_cost,
-        "labour_pct": 25,
-        "finishing_cost": oth_cost,
-        "finishing_cost_inr": oth_cost,
-        "finishing_pct": 20,
-        "disclaimer": "This is an indicative estimate, not an official quotation or government-approved construction rate.",
-    }

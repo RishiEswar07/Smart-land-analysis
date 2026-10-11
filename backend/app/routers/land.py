@@ -17,7 +17,7 @@ calls the service layer, and maps results/errors to HTTP responses.
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
@@ -27,6 +27,7 @@ from app.models.user import User
 from app.schemas.land import LandCreate, LandListResponse, LandResponse, LandUpdate
 from app.services import land_service
 from app.services.exceptions import NotFoundError
+from app.services.facility_service import fetch_nearby_facilities
 
 router = APIRouter(prefix="/lands", tags=["Land Management"])
 
@@ -87,6 +88,53 @@ async def get_land(
     except NotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return LandResponse.model_validate(land)
+
+
+@router.get(
+    "/{land_id}/facilities",
+    status_code=status.HTTP_200_OK,
+    summary="Get nearby facilities with real geodesic distances in km",
+)
+async def get_land_facilities(
+    land_id: uuid.UUID,
+    radius_km: float = Query(5.0, ge=1.0, le=50.0),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Fetches real nearby facilities around the parcel using OpenStreetMap Overpass."""
+    try:
+        land = await land_service.get_land(db, land_id)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    lat = land.latitude
+    lng = land.longitude
+    if lat is None or lng is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Land record has no valid coordinates.")
+
+    data = await fetch_nearby_facilities(lat, lng, radius_km=radius_km)
+    return {
+        **data,
+        **data.get("categories", {}),
+    }
+
+
+@router.get(
+    "/nearby-facilities/search",
+    status_code=status.HTTP_200_OK,
+    summary="Query nearby facilities by coordinates without requiring a saved land record",
+)
+async def search_nearby_facilities(
+    lat: float = Query(..., ge=-90.0, le=90.0),
+    lng: float = Query(..., ge=-180.0, le=180.0),
+    radius_km: float = Query(5.0, ge=1.0, le=50.0),
+):
+    """Interactive preview of nearby facilities and geodesic distances in km."""
+    data = await fetch_nearby_facilities(lat, lng, radius_km=radius_km)
+    return {
+        **data,
+        **data.get("categories", {}),
+    }
 
 
 @router.put(

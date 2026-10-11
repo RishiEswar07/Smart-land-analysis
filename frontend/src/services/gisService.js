@@ -34,57 +34,6 @@ export const normalizeSoilType = (rawSoil) => {
   return mapSoilType(rawSoil);
 };
 
-/**
- * Dynamically computes a fallback geometric parcel polygon and area
- * around the clicked coordinates (in square feet).
- */
-export const generateEstimatedParcel = (lat, lng, sideLengthMeters = 15) => {
-  const latRad = (lat * Math.PI) / 180;
-  const metersPerDegLat = 111320;
-  const metersPerDegLng = 111320 * Math.max(Math.cos(latRad), 0.0001);
-
-  const halfLat = (sideLengthMeters / 2) / metersPerDegLat;
-  const halfLng = (sideLengthMeters / 2) / metersPerDegLng;
-
-  const minLat = lat - halfLat;
-  const maxLat = lat + halfLat;
-  const minLng = lng - halfLng;
-  const maxLng = lng + halfLng;
-
-  const coords = [
-    [minLng, minLat],
-    [maxLng, minLat],
-    [maxLng, maxLat],
-    [minLng, maxLat],
-    [minLng, minLat]
-  ];
-
-  const geojson = {
-    type: 'Feature',
-    properties: {
-      isEstimated: true,
-      center: [lng, lat],
-      sideLengthMeters
-    },
-    geometry: {
-      type: 'Polygon',
-      coordinates: [coords]
-    }
-  };
-
-  const sqMeters = area(geojson);
-  const areaSqFt = sqMeters * 10.7639104;
-
-  return {
-    available: true,
-    isEstimated: true,
-    source: `Geometric Bounding Calculation (${sideLengthMeters}m Lot)`,
-    coords: coords.map(c => ({ lat: c[1], lng: c[0] })),
-    areaSqFt: Math.round(areaSqFt * 10) / 10,
-    geojson
-  };
-};
-
 // Centralized Building Requirements and Minimum Plot Sizes
 export const BUILDING_REQUIREMENTS = {
   'Individual House': { minSqFt: 400, label: 'Individual House', rate: 2000, description: 'Single-family standalone residence' },
@@ -142,21 +91,23 @@ export const calculateGeodesicArea = (coords) => {
       }
       sqMeters = Math.abs((totalArea * (R * R)) / 2.0);
     } catch (e) {
-      sqMeters = 222.96; // fallback 2400 sqft
+      sqMeters = 0;
     }
   }
 
   if (isNaN(sqMeters) || sqMeters <= 0) {
-    sqMeters = 0;
+    return { sqMeters: 0, sqFt: 0, cents: 0, acres: 0 };
   }
 
   const sqFt = sqMeters * 10.7639104;
   const cents = sqFt / 435.6;
+  const acres = sqFt / 43560.0;
 
   return {
     sqMeters: Math.round(sqMeters * 10) / 10,
     sqFt: Math.round(sqFt * 10) / 10,
-    cents: Math.round(cents * 100) / 100
+    cents: Math.round(cents * 100) / 100,
+    acres: Math.round(acres * 10000) / 10000
   };
 };
 
@@ -184,33 +135,6 @@ export const validatePlotSize = (buildingType, areaSqFt) => {
     message: isValid
       ? `Plot area (${actual.toLocaleString()} sq.ft) meets or exceeds the minimum required (${minRequired.toLocaleString()} sq.ft) for ${normType}. (+${Math.round(diff).toLocaleString()} sq.ft surplus)`
       : `Plot area (${actual.toLocaleString()} sq.ft) is below the minimum required (${minRequired.toLocaleString()} sq.ft) for ${normType}. Deficit of ${Math.round(Math.abs(diff)).toLocaleString()} sq.ft.`
-  };
-};
-
-/**
- * Calculates indicative construction cost with 55% material, 25% labour, and 20% finishing breakdown.
- */
-export const calculateConstructionCost = (buildingType, areaSqFt, customRate = null) => {
-  const normType = Object.keys(BUILDING_REQUIREMENTS).find(
-    k => k.toLowerCase() === (buildingType || '').toLowerCase()
-  ) || 'Individual House';
-
-  const req = BUILDING_REQUIREMENTS[normType] || BUILDING_REQUIREMENTS['Individual House'];
-  const rate = customRate !== null && Number(customRate) > 0 ? Number(customRate) : req.rate;
-  const area = Math.max(Number(areaSqFt) || 0, 0);
-  const totalCost = Math.round(area * rate);
-
-  return {
-    buildingType: normType,
-    areaSqFt: area,
-    ratePerSqFt: rate,
-    totalEstimatedCost: totalCost,
-    materialCost: Math.round(totalCost * 0.55),
-    labourCost: Math.round(totalCost * 0.25),
-    finishingCost: Math.round(totalCost * 0.20),
-    materialPct: 55,
-    labourPct: 25,
-    finishingPct: 20
   };
 };
 
@@ -279,11 +203,18 @@ const gisService = {
         }
       }
     } catch (error) {
-      console.warn('Overpass parcel fetch failed, using geometric calculation:', error);
+      console.warn('Overpass parcel fetch:', error);
     }
 
-    // Dynamic geometric fallback calculation based on clicked coordinates
-    return generateEstimatedParcel(lat, lng, 15);
+    // No synthetic geometry is invented for unmapped points
+    return {
+      available: false,
+      isEstimated: false,
+      source: null,
+      coords: [],
+      areaSqFt: null,
+      geojson: null
+    };
   },
 
   /**
@@ -373,6 +304,26 @@ const gisService = {
     } catch (error) {
       console.warn('ESA WorldCover fetch error:', error);
       return { available: false, error: error.message };
+    }
+  },
+
+  /**
+   * Fetch real nearby facilities and geodesic proximity (km) via backend Overpass proxy
+   */
+  async fetchNearbyFacilities(lat, lng, radiusKm = 5.0) {
+    try {
+      const response = await api.get('/lands/nearby-facilities/search', {
+        params: { lat, lng, radius_km: radiusKm }
+      });
+      return response.data;
+    } catch (error) {
+      console.warn('Nearby facilities fetch error:', error);
+      return {
+        search_radius_km: radiusKm,
+        total_facilities_found: 0,
+        categories: {},
+        all_facilities: []
+      };
     }
   }
 };

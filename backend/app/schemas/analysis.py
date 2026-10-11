@@ -94,7 +94,7 @@ class DetailedAnalysisResponse(BaseModel):
     property_info: dict
     area_conversions: dict = Field(default_factory=dict)
     plot_validation: dict = Field(default_factory=dict)
-    construction_cost: dict = Field(default_factory=dict)
+    nearby_facilities: dict = Field(default_factory=dict)
     suitability: dict
     factors: list[FactorScoreItem]
     risks: dict
