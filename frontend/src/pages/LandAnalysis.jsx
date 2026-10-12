@@ -669,7 +669,7 @@ export default function LandAnalysis() {
       {/* ---------------- STEP 2: FETCHING LOADING ---------------- */}
       {step === 'fetching' && (
         <div className="py-20">
-          <Loader label="Fetching real GIS, Open-Meteo flood metrics, and soil data..." />
+          <Loader label="Fetching geospatial terrain, flood risk metrics, and soil data..." />
         </div>
       )}
 
@@ -683,7 +683,6 @@ export default function LandAnalysis() {
               <div className="flex justify-between items-center py-3 border-b border-slate-100">
                 <div>
                   <p className="text-sm font-bold text-slate-700">Address / Locality</p>
-                  <p className="text-[10px] text-slate-400">Source: Nominatim Geocoding API</p>
                 </div>
                 <span className="text-sm text-slate-600 font-medium text-right max-w-[50%]">
                   {gisData.address || <span className="text-slate-400">Coordinates ({gisData.lat?.toFixed(4)}, {gisData.lng?.toFixed(4)})</span>}
@@ -692,10 +691,7 @@ export default function LandAnalysis() {
 
               <div className="flex justify-between items-center py-3 border-b border-slate-100">
                 <div>
-                  <p className="text-sm font-bold text-slate-700">Parcel Area & Provenance</p>
-                  <p className="text-[10px] text-slate-400">
-                    Source: {gisData.area_source === 'direct_input' ? 'User-entered Land Area' : 'Selected Land Boundary'}
-                  </p>
+                  <p className="text-sm font-bold text-slate-700">Parcel Land Area</p>
                 </div>
                 <div className="text-right">
                   <span className="text-sm font-black text-blue-600 block">
@@ -713,15 +709,13 @@ export default function LandAnalysis() {
               <div className="flex justify-between items-center py-3 border-b border-slate-100">
                 <div>
                   <p className="text-sm font-bold text-slate-700">Soil Taxonomy</p>
-                  <p className="text-[10px] text-slate-400">Source: ISRIC SoilGrids REST API</p>
                 </div>
                 <span className="text-sm text-slate-600 font-medium">{gisData.soil_type || 'Red Soil'}</span>
               </div>
 
               <div className="flex justify-between items-center py-3 border-b border-slate-100">
                 <div>
-                  <p className="text-sm font-bold text-slate-700">Land Cover (ESA WorldCover)</p>
-                  <p className="text-[10px] text-slate-400">Source: ESA WorldCover 10m (Sentinel-2 COG)</p>
+                  <p className="text-sm font-bold text-slate-700">Land Cover Classification</p>
                 </div>
                 {gisData.land_cover && gisData.land_cover.land_cover_name ? (
                   <div className="text-right">
@@ -744,7 +738,6 @@ export default function LandAnalysis() {
               <div className="flex justify-between items-center py-3 border-b border-slate-100">
                 <div>
                   <p className="text-sm font-bold text-slate-700">Road Access Width</p>
-                  <p className="text-[10px] text-slate-400">Source: OpenStreetMap / Overpass (Highway)</p>
                 </div>
                 <span className="text-sm text-slate-600 font-medium">{gisData.road_width ? `${gisData.road_width} ft` : '20 ft'}</span>
               </div>
@@ -752,7 +745,6 @@ export default function LandAnalysis() {
               <div className="flex justify-between items-center py-3 border-b border-slate-100">
                 <div>
                   <p className="text-sm font-bold text-slate-700">Water Infrastructure</p>
-                  <p className="text-[10px] text-slate-400">Source: OpenStreetMap / Overpass</p>
                 </div>
                 <span className="text-sm text-slate-600 font-medium">{gisData.water_availability !== false ? 'Available' : 'Not Available'}</span>
               </div>
@@ -760,7 +752,6 @@ export default function LandAnalysis() {
               <div className="flex justify-between items-center py-3">
                 <div>
                   <p className="text-sm font-bold text-slate-700">Electricity Infrastructure</p>
-                  <p className="text-[10px] text-slate-400">Source: OpenStreetMap / Overpass</p>
                 </div>
                 <span className="text-sm text-slate-600 font-medium">{gisData.electricity_availability !== false ? 'Available' : 'Not Available'}</span>
               </div>
@@ -954,7 +945,7 @@ export default function LandAnalysis() {
                   <h4 className="font-bold text-slate-800 text-sm mb-1">Risk breakdown</h4>
                   <RiskBreakdownList breakdown={result.risk_breakdown} />
                   <p className="text-[10px] text-slate-400 mt-3 border-t border-slate-100 pt-2">
-                    * Flood risk is calculated using live Open-Meteo elevation & river discharge hydrology.
+                    * Flood risk is calculated using live terrain elevation & river discharge hydrology.
                   </p>
                 </div>
                 

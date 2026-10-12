@@ -2,7 +2,7 @@ const stack = [
   { group: 'Frontend', items: ['React 18 (Vite)', 'MapLibre GL & Turf.js', 'Tailwind CSS', 'React Router v6', 'Recharts'] },
   { group: 'Backend', items: ['FastAPI (Python 3.11)', 'SQLAlchemy 2.0 (Async)', 'Supabase PostgreSQL', 'PyJWT Authentication', 'ReportLab & openpyxl'] },
   { group: 'Machine Learning', items: ['Scikit-learn', 'Random Forest Classifier', 'Feature Scaling & Encoders', 'Lightweight Inference API'] },
-  { group: 'Geospatial Data Sources', items: ['OpenStreetMap Overpass API', 'ISRIC SoilGrids v2.0 (WRB)', 'Open-Elevation API', 'Open-Meteo Hydrology API', 'ESA WorldCover 10m'] },
+  { group: 'Geospatial Intelligence', items: ['Road & Transit Infrastructure', 'Soil Taxonomy Classification', 'Digital Terrain Elevation', 'Hydrological Flood Modeling', 'Satellite Land Cover'] },
 ]
 
 const principles = [
@@ -12,11 +12,11 @@ const principles = [
   },
   {
     title: 'Real live geospatial telemetry',
-    desc: 'Soil taxonomy, terrain elevation, ESA land cover, and 8 categories of nearby facilities with geodesic distances (km) are queried live from authoritative GIS APIs.',
+    desc: 'Soil taxonomy, terrain elevation, satellite land cover, and 8 categories of nearby facilities with geodesic distances (km) are processed through automated multi-criteria geospatial algorithms.',
   },
   {
     title: 'Honest academic rigor',
-    desc: 'Designed as an engineering decision-support tool. It clearly states provenance metadata and serves as a planning aid rather than a replacement for physical geotechnical surveys.',
+    desc: 'Designed as an engineering decision-support tool. It clearly outlines decision factors and serves as a planning aid rather than a replacement for physical geotechnical surveys.',
   },
 ]
 

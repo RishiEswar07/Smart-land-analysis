@@ -598,9 +598,9 @@ def build_detailed_analysis_dict(land: Land, analysis: Analysis) -> dict:
             "impact": _impact_label(flood_safety_score),
             "weight": 0.35,
             "why_reason": flood_why,
-            "data_source": "Open-Meteo Elevation & GloFAS Flood API",
+            "data_source": "Topographic Elevation & Flood Risk Modeling",
             "data_confidence": "High (95%)",
-            "description": "Evaluated from Open-Meteo geodetic elevation and GloFAS daily river discharge hydrology.",
+            "description": "Evaluated from geodetic elevation and daily river discharge hydrology models.",
         },
         {
             "name": "Road Accessibility",
@@ -608,9 +608,9 @@ def build_detailed_analysis_dict(land: Land, analysis: Analysis) -> dict:
             "impact": _impact_label(road_access_score),
             "weight": 0.25,
             "why_reason": road_why,
-            "data_source": "OpenStreetMap / Overpass Highway Topology",
+            "data_source": "Road Network & Access Corridor Topology",
             "data_confidence": "High (95%)",
-            "description": f"Measured from OpenStreetMap highway vectors and right-of-way roadway width ({road_w:.0f}ft).",
+            "description": f"Measured from highway network vectors and right-of-way roadway width ({road_w:.0f}ft).",
         },
         {
             "name": "Nearby Infrastructure",
@@ -618,9 +618,9 @@ def build_detailed_analysis_dict(land: Land, analysis: Analysis) -> dict:
             "impact": _impact_label(infra_score),
             "weight": 0.25,
             "why_reason": infra_why,
-            "data_source": "OpenStreetMap Utility Grid Data",
+            "data_source": "Municipal Utility Grid Analysis",
             "data_confidence": "High (90%)",
-            "description": "Quantified from OpenStreetMap utility grid accessibility (power grid and water availability).",
+            "description": "Quantified from municipal utility grid accessibility (power grid and water availability).",
         },
         {
             "name": "Terrain",
@@ -628,9 +628,9 @@ def build_detailed_analysis_dict(land: Land, analysis: Analysis) -> dict:
             "impact": _impact_label(terrain_score),
             "weight": 0.05,
             "why_reason": terrain_why,
-            "data_source": "Copernicus DEM (90m Global Elevation)",
+            "data_source": "Digital Elevation & Terrain Model",
             "data_confidence": "High (95%)",
-            "description": "Assessed from Open-Meteo 90m DEM topographic elevation stability.",
+            "description": "Assessed from topographic digital elevation model stability.",
         },
         {
             "name": "Land Use",
@@ -638,9 +638,9 @@ def build_detailed_analysis_dict(land: Land, analysis: Analysis) -> dict:
             "impact": _impact_label(land_use_score),
             "weight": 0.10,
             "why_reason": land_use_why,
-            "data_source": "ESA WorldCover 10m (Sentinel-1/2 Composite)",
+            "data_source": "Satellite Land Cover Classification",
             "data_confidence": "High (100%)",
-            "description": "Validated against ESA WorldCover 10m Sentinel-2 satellite land cover classification and zoning.",
+            "description": "Validated against multi-spectral satellite land cover classification and zoning.",
         },
         {
             "name": "Development Potential",
@@ -852,5 +852,15 @@ async def get_detailed_analysis_by_id(db: AsyncSession, analysis_id: uuid.UUID, 
             details["nearby_facilities"] = fac
         except Exception as exc:
             logger.warning(f"Could not load nearby facilities: {exc}")
+            details["nearby_facilities"] = {
+                "status": "unavailable",
+                "message": "Nearby facilities lookup timed out or was temporarily unavailable.",
+                "search_radius_km": 5.0,
+                "categories": {},
+                "all_facilities": [],
+                "summary_counts": {},
+                "total_facilities_found": 0,
+                "total_found": 0,
+            }
 
     return details

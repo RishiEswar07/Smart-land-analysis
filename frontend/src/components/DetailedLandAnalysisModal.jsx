@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import analysisService from '../services/analysisService'
 import reportService from '../services/reportService'
 import landService from '../services/landService'
@@ -11,7 +11,7 @@ import Loader from './Loader'
  * -------------------------
  * Comprehensive, interactive breakdown modal for land analysis.
  * Displays factor scores, 4-unit area conversions (sq.ft, sq.m, cents, acres),
- * area source provenance, data quality, data sources provenance,
+ * area source provenance, data quality,
  * calculation methodology, and multi-format exports.
  */
 export default function DetailedLandAnalysisModal({
@@ -29,6 +29,7 @@ export default function DetailedLandAnalysisModal({
   const [facilityRadius, setFacilityRadius] = useState(5.0)
   const [customFacilities, setCustomFacilities] = useState(null)
   const [loadingFacilities, setLoadingFacilities] = useState(false)
+  const reqIdRef = useRef(0)
 
   // Fetch detailed data whenever modal opens
   useEffect(() => {
@@ -73,7 +74,6 @@ export default function DetailedLandAnalysisModal({
   const factors = data?.factors || []
   const calc = data?.score_calculation || {}
   const quality = data?.data_quality || {}
-  const sources = data?.data_sources || []
   const historical = data?.historical_change || {}
   const rec = data?.recommendation || {}
   const areaConv = data?.area_conversions || {}
@@ -81,10 +81,18 @@ export default function DetailedLandAnalysisModal({
   const facilities = customFacilities || data?.nearby_facilities || {}
   const disclaimer = data?.disclaimer || 'This analysis is a GIS-based decision-support assessment.'
 
-  const handleRadiusChange = async (radius) => {
-    if (radius === facilityRadius && (customFacilities || data?.nearby_facilities)) return
+  const handleRadiusChange = async (radius, force = false) => {
+    const currentFacilities = customFacilities || data?.nearby_facilities
+    const currentCount = currentFacilities?.total_facilities_found ?? currentFacilities?.total_found ?? (currentFacilities?.all_facilities?.length ?? 0)
+
+    if (!force && radius === facilityRadius && currentFacilities && currentCount > 0 && currentFacilities.status !== 'unavailable') {
+      return
+    }
+
     setFacilityRadius(radius)
     setLoadingFacilities(true)
+    const thisReqId = ++reqIdRef.current
+
     try {
       let res = null
       const lat = prop.latitude ?? data?.latitude
@@ -97,15 +105,30 @@ export default function DetailedLandAnalysisModal({
         res = await gisService.fetchNearbyFacilities(lat, lng, radius)
       }
 
-      if (res) {
+      if (thisReqId === reqIdRef.current && res) {
         setCustomFacilities(res)
       }
     } catch (err) {
       console.warn('Failed to update nearby facility radius:', err)
+      if (thisReqId === reqIdRef.current) {
+        setCustomFacilities({ status: 'unavailable', categories: {}, total_facilities_found: 0 })
+      }
     } finally {
-      setLoadingFacilities(false)
+      if (thisReqId === reqIdRef.current) {
+        setLoadingFacilities(false)
+      }
     }
   }
+
+  // Auto-fetch facilities if analysis loads without nearby facilities data
+  useEffect(() => {
+    if (!isOpen || !data) return
+    const fac = customFacilities || data?.nearby_facilities
+    const count = fac?.total_facilities_found ?? fac?.total_found ?? (fac?.all_facilities?.length ?? 0)
+    if (!customFacilities && (!fac || count === 0)) {
+      handleRadiusChange(facilityRadius || 5.0, true)
+    }
+  }, [isOpen, data])
 
   const areaSqFt = areaConv.sqft ?? prop.area_sqft ?? 0
   const areaSqm = areaConv.sqm ?? (areaSqFt ? (areaSqFt / 10.7639).toFixed(1) : 0)
@@ -468,10 +491,10 @@ export default function DetailedLandAnalysisModal({
             {showFormulaDetails && (
               <div className="mt-4 p-3 bg-white rounded-lg border border-blue-200 text-xs text-slate-700 leading-relaxed space-y-1.5">
                 <p className="font-bold text-blue-900">How the Hybrid AI & Physical Engine works:</p>
-                <p>1. <strong>Physical Hydrology</strong>: Uses Open-Meteo elevation and Copernicus GloFAS river discharge to calculate flood vulnerability.</p>
-                <p>2. <strong>Spatial Connectivity</strong>: Queries OpenStreetMap Overpass for road access corridor width and municipal utility points.</p>
-                <p>3. <strong>Geotechnical Soil & Land Cover</strong>: Queries ISRIC SoilGrids 250m WRB taxonomy and ESA WorldCover 10m satellite classification.</p>
-                <p>4. <strong>Random Forest Ensemble</strong>: Weighs all dimensions against building type requirements to predict feasibility score and risk level.</p>
+                <p>1. <strong>Physical Hydrology</strong>: Models terrain elevation, runoff accumulation, and river discharge to calculate flood vulnerability.</p>
+                <p>2. <strong>Spatial Connectivity</strong>: Evaluates road access corridor width and municipal utility infrastructure proximity.</p>
+                <p>3. <strong>Geotechnical Soil & Land Cover</strong>: Evaluates soil taxonomy composition, load-bearing suitability, and satellite land cover classification.</p>
+                <p>4. <strong>Machine Learning Ensemble</strong>: Weighs all dimensions against building type requirements to predict feasibility score and risk level.</p>
               </div>
             )}
           </div>
@@ -513,36 +536,7 @@ export default function DetailedLandAnalysisModal({
             </div>
           </div>
 
-          {/* Section 5: Exact Data Sources & Provenance Metadata */}
-          <div>
-            <h4 className="text-sm font-bold text-slate-900 mb-2">Exact Data Sources & Provenance Metadata</h4>
-            <div className="border border-slate-200 rounded-xl overflow-x-auto shadow-sm">
-              <table className="w-full text-left text-xs min-w-[650px]">
-                <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase tracking-wider text-[10px]">
-                  <tr>
-                    <th className="px-3.5 py-2.5">Dataset</th>
-                    <th className="px-3.5 py-2.5">Source Provider</th>
-                    <th className="px-3.5 py-2.5">Data Date / Version</th>
-                    <th className="px-3.5 py-2.5">Resolution</th>
-                    <th className="px-3.5 py-2.5">Processing Method</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {sources.map((s, idx) => (
-                    <tr key={idx} className="hover:bg-slate-50/60">
-                      <td className="px-3.5 py-2 font-bold text-slate-800">{s.dataset_name}</td>
-                      <td className="px-3.5 py-2 text-slate-600">{s.source}</td>
-                      <td className="px-3.5 py-2 text-slate-500">{s.data_date}</td>
-                      <td className="px-3.5 py-2 font-mono text-[11px] text-slate-600">{s.resolution}</td>
-                      <td className="px-3.5 py-2 text-slate-500">{s.processing_method}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Section 6: Nearby Essential Facilities & Geodesic Proximity */}
+          {/* Section 5: Nearby Essential Facilities & Geodesic Proximity */}
           <div>
             <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
               <div>
@@ -550,7 +544,7 @@ export default function DetailedLandAnalysisModal({
                   <span>📍</span> Nearby Essential Facilities & Geodesic Proximity
                 </h4>
                 <p className="text-[11px] text-slate-500">
-                  OpenStreetMap geospatial infrastructure • Geodesic straight-line distance in kilometres (km) from parcel centroid
+                  Essential infrastructure • Geodesic straight-line distance in kilometres (km) from parcel centroid. Actual travel distance via roads may vary.
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -581,10 +575,10 @@ export default function DetailedLandAnalysisModal({
 
             {facilities?.status === 'unavailable' && !loadingFacilities && (
               <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl mb-3 flex items-center justify-between text-xs text-amber-800">
-                <span>⚠️ OpenStreetMap live query temporarily unavailable. You can click Retry or change radius.</span>
+                <span>⚠️ Proximity service temporarily busy. You can click Retry or change search radius.</span>
                 <button
                   type="button"
-                  onClick={() => handleRadiusChange(facilityRadius)}
+                  onClick={() => handleRadiusChange(facilityRadius, true)}
                   className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded font-medium text-[11px]"
                 >
                   Retry
@@ -595,7 +589,7 @@ export default function DetailedLandAnalysisModal({
             {loadingFacilities ? (
               <div className="p-8 text-center bg-slate-50 border border-slate-200 rounded-xl my-2">
                 <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
-                <p className="text-xs font-semibold text-slate-700">Querying OpenStreetMap infrastructure ({facilityRadius} km)...</p>
+                <p className="text-xs font-semibold text-slate-700">Analyzing nearby facilities ({facilityRadius} km)...</p>
                 <p className="text-[11px] text-slate-400 mt-0.5">Computing geodesic straight-line proximity</p>
               </div>
             ) : (() => {
@@ -652,19 +646,12 @@ export default function DetailedLandAnalysisModal({
                       )
                     })}
                   </div>
-                  {facilities?.source && (
-                    <div className="mt-2 text-right">
-                      <span className="text-[10px] text-slate-400">
-                        Data source: {facilities.source}
-                      </span>
-                    </div>
-                  )}
                 </div>
               )
             })()}
           </div>
 
-          {/* Section 7: Historical Change Status */}
+          {/* Section 6: Historical Change Status */}
           <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs">
             <div className="flex items-center gap-2 font-bold text-slate-700 mb-1">
               <svg className="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">

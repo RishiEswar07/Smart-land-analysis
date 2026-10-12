@@ -33,7 +33,7 @@ export default function Dashboard() {
 
   // Facilities/flood-risk for the most recently analysed land (if any)
   const latestLandId = recent?.[0]?.land_id
-  const { data: facilities } = useFetch(
+  const { data: facilities, loading: loadingFacilities } = useFetch(
     () => (latestLandId ? landService.getNearbyFacilities(latestLandId) : Promise.resolve(null)),
     [latestLandId],
     Boolean(latestLandId)
@@ -116,19 +116,25 @@ export default function Dashboard() {
         <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="font-display font-semibold text-ink text-lg">Nearby Essential Facilities</h2>
-            <p className="text-xs text-slate-dim">Live geodesic proximity (km) from parcel centroid via OpenStreetMap Overpass</p>
+            <p className="text-xs text-slate-dim">Live geodesic proximity (km) from parcel centroid</p>
           </div>
         </div>
-        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <FacilityCard icon="🚌" title="Bus Stands & Stops" items={facilities?.bus_stands ?? facilities?.categories?.bus_stands ?? []} emptyLabel="No bus stops within radius" />
-          <FacilityCard icon="🚆" title="Railway Stations" items={facilities?.railway_stations ?? facilities?.categories?.railway_stations ?? []} emptyLabel="No stations within radius" />
-          <FacilityCard icon="✈️" title="Airports" items={facilities?.airports ?? facilities?.categories?.airports ?? []} emptyLabel="No airports within radius" />
-          <FacilityCard icon="🏥" title="Hospitals & Clinics" items={facilities?.hospitals ?? facilities?.categories?.hospitals ?? []} emptyLabel="No hospitals within radius" />
-          <FacilityCard icon="🏫" title="Schools & Colleges" items={facilities?.schools ?? facilities?.categories?.schools ?? []} emptyLabel="No schools within radius" />
-          <FacilityCard icon="🛍️" title="Commercial & Shopping" items={facilities?.commercial ?? facilities?.categories?.commercial ?? []} emptyLabel="No shops within radius" />
-          <FacilityCard icon="🛣️" title="Main Road Network" items={facilities?.roads ?? facilities?.categories?.roads ?? []} emptyLabel="No major highways adjacent" />
-          <FacilityCard icon="🌊" title="Water Bodies & Hydrology" items={facilities?.water_bodies ?? facilities?.categories?.water_bodies ?? []} emptyLabel="No water bodies within radius" />
-        </div>
+        {loadingFacilities ? (
+          <div className="card-base p-8 text-center">
+            <Loader label="Evaluating nearby essential infrastructure…" />
+          </div>
+        ) : (
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <FacilityCard icon="🚌" title="Bus Stands & Stops" items={facilities?.bus_stands ?? facilities?.categories?.bus_stands ?? []} emptyLabel="No bus stops within radius" />
+            <FacilityCard icon="🚆" title="Railway Stations" items={facilities?.railway_stations ?? facilities?.categories?.railway_stations ?? []} emptyLabel="No stations within radius" />
+            <FacilityCard icon="✈️" title="Airports" items={facilities?.airports ?? facilities?.categories?.airports ?? []} emptyLabel="No airports within radius" />
+            <FacilityCard icon="🏥" title="Hospitals & Clinics" items={facilities?.hospitals ?? facilities?.categories?.hospitals ?? []} emptyLabel="No hospitals within radius" />
+            <FacilityCard icon="🏫" title="Schools & Colleges" items={facilities?.schools ?? facilities?.categories?.schools ?? []} emptyLabel="No schools within radius" />
+            <FacilityCard icon="🛍️" title="Commercial & Shopping" items={facilities?.commercial ?? facilities?.categories?.commercial ?? []} emptyLabel="No shops within radius" />
+            <FacilityCard icon="🛣️" title="Main Road Network" items={facilities?.roads ?? facilities?.categories?.roads ?? []} emptyLabel="No major highways adjacent" />
+            <FacilityCard icon="🌊" title="Water Bodies & Hydrology" items={facilities?.water_bodies ?? facilities?.categories?.water_bodies ?? []} emptyLabel="No water bodies within radius" />
+          </div>
+        )}
       </div>
 
       {/* ---------------- CHARTS ---------------- */}

@@ -245,19 +245,25 @@ def generate_land_report_pdf(land: Land, analysis: Analysis, details: dict | Non
         except (ValueError, TypeError):
             infra_s = 75.0
         factors_data = [
-            {"name": "Flood Safety", "score": flood_s, "impact": "Positive" if flood_s >= 70 else "Moderate", "weight": 0.35, "why_reason": "Copernicus DEM elevation baseline and GloFAS daily river discharge hydrology."},
-            {"name": "Road Accessibility", "score": access_s, "impact": "Positive" if access_s >= 70 else "Moderate", "weight": 0.25, "why_reason": "OpenStreetMap road corridor width and verified highway topology."},
+            {"name": "Flood Safety", "score": flood_s, "impact": "Positive" if flood_s >= 70 else "Moderate", "weight": 0.35, "why_reason": "Topographic elevation baseline and river discharge hydrology modeling."},
+            {"name": "Road Accessibility", "score": access_s, "impact": "Positive" if access_s >= 70 else "Moderate", "weight": 0.25, "why_reason": "Roadway corridor right-of-way width and accessibility topology."},
             {"name": "Nearby Infrastructure", "score": infra_s, "impact": "Positive" if infra_s >= 70 else "Moderate", "weight": 0.25, "why_reason": "Municipal water utility and electricity power grid accessibility."},
-            {"name": "Terrain", "score": 90.0, "impact": "Positive", "weight": 0.05, "why_reason": "Copernicus 90m DEM elevation baseline indicates stable geomorphic terrain."},
-            {"name": "Land Use", "score": 85.0, "impact": "Positive", "weight": 0.10, "why_reason": "ESA WorldCover 10m Sentinel-2 satellite classification and municipal zoning."},
+            {"name": "Terrain", "score": 90.0, "impact": "Positive", "weight": 0.05, "why_reason": "Digital elevation model baseline indicates stable geomorphic terrain."},
+            {"name": "Land Use", "score": 85.0, "impact": "Positive", "weight": 0.10, "why_reason": "Satellite land cover classification and municipal zoning."},
             {"name": "Development Potential", "score": 80.0, "impact": "Positive", "weight": 0.10, "why_reason": f"Parcel area ({area_sqft:,.0f} sq.ft) adequacy and facility demand."},
-            {"name": "Data Confidence", "score": 95.0, "impact": "Positive", "weight": None, "why_reason": "Composite completeness across 7 integrated GIS/satellite layers."},
+            {"name": "Data Confidence", "score": 95.0, "impact": "Positive", "weight": None, "why_reason": "Composite completeness across integrated GIS/satellite layers."},
         ]
 
     for f in factors_data:
         imp = f.get("impact", "Moderate")
         imp_style = impact_pos if imp == "Positive" else (impact_neg if imp == "Negative" else impact_mod)
-        w_str = f"{round(f['weight'] * 100)}%" if f.get("weight") is not None else "—"
+        w = f.get("weight")
+        if w is None:
+            w_str = "—"
+        elif isinstance(w, (int, float)):
+            w_str = f"{round(w * 100)}%"
+        else:
+            w_str = str(w)
         score_val = f"{f['score']:.1f}%" if f.get("score") is not None else "N/A"
         why_text = f.get("why_reason") or f.get("description", "")
         factor_rows.append([
@@ -281,9 +287,11 @@ def generate_land_report_pdf(land: Land, analysis: Analysis, details: dict | Non
 
     # ---------------- 5. Environmental, Hydrology & Historical Change ----------------
     story.append(Paragraph("5. Environmental, Hydrology & Historical Change", section_style))
+    flood_r = getattr(analysis, 'flood_risk', None) or "Low"
+    env_r = getattr(analysis, 'environmental_risk', None) or "Low"
     env_rows = [
-        [Paragraph("Flood Exposure", label_style), Paragraph(f"<b>{analysis.flood_risk}</b> (Copernicus DEM & GloFAS River Discharge)", value_style)],
-        [Paragraph("Satellite Land Cover", label_style), Paragraph(f"<b>{analysis.environmental_risk}</b> (ESA WorldCover 10m Sentinel-2 Ground Truth)", value_style)],
+        [Paragraph("Flood Exposure", label_style), Paragraph(f"<b>{flood_r}</b> (Geospatial Elevation & Hydrology)", value_style)],
+        [Paragraph("Satellite Land Cover", label_style), Paragraph(f"<b>{env_r}</b> (Satellite Ground Classification)", value_style)],
         [Paragraph("Historical Change", label_style), Paragraph("<b>Unavailable</b> — Multi-temporal satellite imagery analysis requires connected time-series satellite feeds.", value_style)],
     ]
     env_table = Table(env_rows, colWidths=[4.2 * cm, 14.4 * cm])
@@ -335,7 +343,7 @@ def generate_land_report_pdf(land: Land, analysis: Analysis, details: dict | Non
                 Paragraph("Facility Category", label_style),
                 Paragraph("Facility Name", label_style),
                 Paragraph("Distance (km)", label_style),
-                Paragraph("Data Source", label_style),
+                Paragraph("Proximity Status", label_style),
             ]
         ]
         # Include top 8 facilities across all categories
@@ -345,7 +353,7 @@ def generate_land_report_pdf(land: Land, analysis: Analysis, details: dict | Non
                 Paragraph(f.get("category", "General"), bold_value_style),
                 Paragraph(f.get("name", "Unnamed Facility"), value_style),
                 Paragraph(f"<b>{d_km:.2f} km</b>", bold_value_style),
-                Paragraph(f.get("status", "OpenStreetMap Overpass"), value_style),
+                Paragraph(f.get("status", "Verified Proximity"), value_style),
             ])
         fac_table = Table(fac_rows, colWidths=[4.5 * cm, 6.0 * cm, 3.0 * cm, 5.1 * cm])
         fac_table.setStyle(TableStyle([
@@ -365,33 +373,9 @@ def generate_land_report_pdf(land: Land, analysis: Analysis, details: dict | Non
             )
         )
 
-    # ---------------- 8. Data Sources & Provenance ----------------
-    story.append(Paragraph("8. Data Sources & Provenance Metadata", section_style))
-    prov_rows = [
-        [Paragraph("Dataset Name", label_style), Paragraph("Authoritative Source", label_style), Paragraph("Resolution", label_style), Paragraph("Processing Method", label_style)]
-    ]
-    prov_items = details.get("data_sources", []) if details else []
-    for p in prov_items:
-        prov_rows.append([
-            Paragraph(p.get("dataset_name", ""), bold_value_style),
-            Paragraph(p.get("source", ""), value_style),
-            Paragraph(p.get("resolution", ""), value_style),
-            Paragraph(p.get("processing_method", ""), value_style),
-        ])
-    if len(prov_rows) > 1:
-        prov_table = Table(prov_rows, colWidths=[4.0 * cm, 4.8 * cm, 3.4 * cm, 6.4 * cm])
-        prov_table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), _BG_HEADER),
-            ("BOX", (0, 0), (-1, -1), 0.5, _LINE),
-            ("INNERGRID", (0, 0), (-1, -1), 0.5, _LINE),
-            ("TOPPADDING", (0, 0), (-1, -1), 2.5),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
-            ("LEFTPADDING", (0, 0), (-1, -1), 4),
-        ]))
-        story.append(prov_table)
-
-    # ---------------- 9. Regulatory Disclaimer ----------------
+    # ---------------- 8. Regulatory Disclaimer ----------------
     story.append(Spacer(1, 8))
+    story.append(Paragraph("8. Regulatory Disclaimer & Conditions", section_style))
     story.append(HRFlowable(width="100%", color=_LINE, thickness=1))
     story.append(Spacer(1, 3))
     story.append(

@@ -23,11 +23,11 @@ export default function Footer() {
         </div>
 
         <div>
-          <h4 className="text-sm font-display font-semibold text-white/90 mb-4">Data sources</h4>
+          <h4 className="text-sm font-display font-semibold text-white/90 mb-4">Core Capabilities</h4>
           <ul className="space-y-2.5 text-sm text-white/60">
-            <li>OpenStreetMap (Overpass)</li>
-            <li>Open-Elevation API</li>
-            <li>Open-Meteo Flood API</li>
+            <li>Geotechnical Suitability</li>
+            <li>Hydrological Risk Assessment</li>
+            <li>Infrastructure Proximity</li>
           </ul>
         </div>
 

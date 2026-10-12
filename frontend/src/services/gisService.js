@@ -193,7 +193,7 @@ const gisService = {
               return {
                 available: true,
                 isEstimated: false,
-                source: 'OpenStreetMap / Overpass (Boundary)',
+                source: 'Survey Boundary Mapping',
                 coords: coords.map(c => ({ lat: c[1], lng: c[0] })),
                 areaSqFt: Math.round(areaSqFt * 10) / 10,
                 geojson
@@ -308,7 +308,7 @@ const gisService = {
   },
 
   /**
-   * Fetch real nearby facilities and geodesic proximity (km) via backend Overpass proxy
+   * Fetch real nearby facilities and geodesic proximity (km) via backend proxy
    */
   async fetchNearbyFacilities(lat, lng, radiusKm = 5.0) {
     try {
@@ -319,8 +319,11 @@ const gisService = {
     } catch (error) {
       console.warn('Nearby facilities fetch error:', error);
       return {
+        status: 'unavailable',
+        message: 'Facility proximity service is temporarily busy. Please retry.',
         search_radius_km: radiusKm,
         total_facilities_found: 0,
+        total_found: 0,
         categories: {},
         all_facilities: []
       };

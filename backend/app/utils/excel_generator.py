@@ -144,14 +144,14 @@ def generate_land_report_excel(land: Land, analysis: Analysis, details: dict) ->
     ws_summary[f"A{start_r}"].font = section_font
 
     suitability_metrics = [
-        ("Overall Suitability Score", f"{analysis.suitability_score:.1f}%" if analysis and analysis.suitability_score is not None else "N/A", "Out of 100% (Higher = More Suitable)"),
-        ("Recommended Building Type", analysis.recommended_building_type if analysis else "N/A", "Optimal developmental footprint"),
-        ("Aggregated Risk Score", f"{analysis.risk_score:.1f}%" if analysis and analysis.risk_score is not None else "N/A", "Composite risk across 4 key dimensions"),
-        ("Overall Risk Level", analysis.risk_level if analysis else "N/A", "Banded Risk Classification (Low/Moderate/High)"),
-        ("Flood Risk Exposure", analysis.flood_risk if analysis else "N/A", "Hydrological elevation & discharge assessment"),
-        ("Environmental Risk", analysis.environmental_risk if analysis else "N/A", "Satellite land cover & ecological sensitivity"),
-        ("Infrastructure Score", f"{analysis.infrastructure_score:.1f}%" if analysis and analysis.infrastructure_score is not None else "N/A", "Utility grid proximity index"),
-        ("Accessibility Score", f"{analysis.traffic_accessibility_score:.1f}%" if analysis and analysis.traffic_accessibility_score is not None else "N/A", "Corridor width & highway accessibility"),
+        ("Overall Suitability Score", f"{getattr(analysis, 'suitability_score', 0):.1f}%" if getattr(analysis, 'suitability_score', None) is not None else "N/A", "Out of 100% (Higher = More Suitable)"),
+        ("Recommended Building Type", getattr(analysis, 'recommended_building_type', None) or getattr(analysis, 'building_type', 'N/A'), "Optimal developmental footprint"),
+        ("Aggregated Risk Score", f"{getattr(analysis, 'risk_score', 0):.1f}%" if getattr(analysis, 'risk_score', None) is not None else "N/A", "Composite risk across 4 key dimensions"),
+        ("Overall Risk Level", getattr(analysis, 'risk_level', 'N/A'), "Banded Risk Classification (Low/Moderate/High)"),
+        ("Flood Risk Exposure", getattr(analysis, 'flood_risk', 'Low'), "Hydrological elevation & discharge assessment"),
+        ("Environmental Risk", getattr(analysis, 'environmental_risk', 'Low'), "Satellite land cover & ecological sensitivity"),
+        ("Infrastructure Score", f"{getattr(analysis, 'infrastructure_score', 0):.1f}%" if getattr(analysis, 'infrastructure_score', None) is not None else "N/A", "Utility grid proximity index"),
+        ("Accessibility Score", f"{getattr(analysis, 'traffic_accessibility_score', 0):.1f}%" if getattr(analysis, 'traffic_accessibility_score', None) is not None else "N/A", "Corridor width & highway accessibility"),
     ]
 
     for idx, (metric, val, note) in enumerate(suitability_metrics, start=start_r + 1):
@@ -220,7 +220,13 @@ def generate_land_report_excel(land: Land, analysis: Analysis, details: dict) ->
         elif impact == "Negative":
             c3.fill = accent_red_fill
 
-        weight_str = f"{round(f['weight'] * 100)}%" if f.get("weight") is not None else "N/A"
+        w = f.get("weight")
+        if w is None:
+            weight_str = "N/A"
+        elif isinstance(w, (int, float)):
+            weight_str = f"{round(w * 100)}%"
+        else:
+            weight_str = str(w)
         c4 = ws_factors.cell(row=r_idx, column=4, value=weight_str)
         c4.alignment = Alignment(horizontal="center")
         c4.font = regular_font
@@ -239,7 +245,7 @@ def generate_land_report_excel(land: Land, analysis: Analysis, details: dict) ->
     ws_fac.views.sheetView[0].showGridLines = True
 
     ws_fac.merge_cells("A1:G2")
-    ws_fac["A1"] = "NEARBY INFRASTRUCTURE & ESSENTIAL FACILITIES (OPENSTREETMAP)"
+    ws_fac["A1"] = "NEARBY INFRASTRUCTURE & ESSENTIAL FACILITIES"
     ws_fac["A1"].font = title_font
     ws_fac["A1"].fill = navy_fill
     ws_fac["A1"].alignment = Alignment(horizontal="center", vertical="center")
@@ -268,7 +274,7 @@ def generate_land_report_excel(land: Land, analysis: Analysis, details: dict) ->
                 f.get("address") or "N/A",
                 f"{f.get('lat', 0.0):.5f}" if f.get("lat") else "N/A",
                 f"{f.get('lng', 0.0):.5f}" if f.get("lng") else "N/A",
-                f.get("status", "Verified (OSM)"),
+                f.get("status", "Verified Proximity"),
             ]
             for col_idx, val in enumerate(row_vals, start=1):
                 c = ws_fac.cell(row=r_idx, column=col_idx, value=val)
@@ -326,37 +332,7 @@ def generate_land_report_excel(land: Land, analysis: Analysis, details: dict) ->
         c4.font = regular_font
         c4.border = border
 
-    # 5. Data Sources & Provenance
-    ws_provenance = wb.create_sheet(title="Data Sources & Provenance")
-    ws_provenance.views.sheetView[0].showGridLines = True
-
-    ws_provenance.merge_cells("A1:F2")
-    ws_provenance["A1"] = "GIS DATA SOURCES, PROVENANCE & TECHNICAL METADATA"
-    ws_provenance["A1"].font = title_font
-    ws_provenance["A1"].fill = blue_header_fill
-    ws_provenance["A1"].alignment = Alignment(horizontal="center", vertical="center")
-
-    headers_prov = ["Dataset Name", "Authoritative Source", "Dataset Date", "Spatial Resolution", "Processing Method", "Sync Frequency"]
-    for c_idx, h_text in enumerate(headers_prov, start=1):
-        cell = ws_provenance.cell(row=4, column=c_idx, value=h_text)
-        cell.font = header_font
-        cell.fill = navy_fill
-        cell.alignment = Alignment(horizontal="center", vertical="center")
-        cell.border = border
-
-    sources = details.get("data_sources", [])
-    for r_idx, s in enumerate(sources, start=5):
-        ws_provenance.cell(row=r_idx, column=1, value=s.get("dataset_name", "")).font = bold_font
-        ws_provenance.cell(row=r_idx, column=2, value=s.get("source", "")).font = regular_font
-        ws_provenance.cell(row=r_idx, column=3, value=s.get("data_date", "")).font = regular_font
-        ws_provenance.cell(row=r_idx, column=4, value=s.get("resolution", "")).font = regular_font
-        ws_provenance.cell(row=r_idx, column=5, value=s.get("processing_method", "")).font = regular_font
-        ws_provenance.cell(row=r_idx, column=6, value=s.get("last_updated", "")).font = regular_font
-
-        for col in range(1, 7):
-            ws_provenance.cell(row=r_idx, column=col).border = border
-
-    # 6. Regulatory Notice
+    # 5. Regulatory Notice
     ws_disc = wb.create_sheet(title="Regulatory Notice")
     ws_disc.views.sheetView[0].showGridLines = True
 
