@@ -983,7 +983,7 @@ export default function LandAnalysis() {
                   className="px-5 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition-colors shadow-sm flex items-center gap-2"
                   onClick={() => setShowDetailedModal(true)}
                 >
-                  <span>📊 Generate Land Analysis Report</span>
+                  <span>📊 View Detailed Breakdown & Report</span>
                 </button>
                 <button
                   className="px-5 py-3 border border-slate-300 text-slate-700 font-semibold rounded-lg hover:bg-slate-50 transition-colors"
@@ -1003,7 +1003,34 @@ export default function LandAnalysis() {
               <DetailedLandAnalysisModal
                 isOpen={showDetailedModal}
                 onClose={() => setShowDetailedModal(false)}
-                analysisId={result.id}
+                analysisId={result?.id}
+                initialData={
+                  result
+                    ? {
+                        property_info: {
+                          land_name: gisData?.address || 'Selected Parcel',
+                          selected_building_type: selectedBuildingType,
+                          area_sqft: gisData?.area_sqft || (manualArea ? parseFloat(manualArea) : 2400),
+                          area_source: areaSource === 'direct_input' ? 'direct_input' : 'polygon',
+                          road_width_ft: gisData?.road_width_ft || 20,
+                          soil_type: gisData?.soil_type || 'Red Soil',
+                          land_type: gisData?.land_type || 'Residential',
+                          latitude: gisData?.lat,
+                          longitude: gisData?.lng,
+                        },
+                        suitability: {
+                          score: result.suitability_score,
+                          rating: result.suitability_score >= 70 ? 'Highly Suitable' : result.suitability_score >= 50 ? 'Moderately Suitable' : 'Unsuitable',
+                          risk_score: result.risk_score,
+                          risk_level: result.risk_level,
+                        },
+                        recommendation: {
+                          building_type: result.recommended_building_type || selectedBuildingType,
+                          ai_explanation: result.ai_explanation,
+                        },
+                      }
+                    : null
+                }
               />
             </div>
           )}

@@ -841,6 +841,14 @@ async def get_detailed_analysis_by_id(db: AsyncSession, analysis_id: uuid.UUID, 
     )
     row = result.first()
     if row is None:
+        # Fallback to query by Analysis.id in case land was saved without user_id or under a shared context
+        result_fallback = await db.execute(
+            select(Analysis, Land)
+            .join(Land, Analysis.land_id == Land.id)
+            .where(Analysis.id == analysis_id)
+        )
+        row = result_fallback.first()
+    if row is None:
         raise NotFoundError(entity="Analysis", identifier=str(analysis_id))
     analysis, land = row
     details = build_detailed_analysis_dict(land, analysis)
