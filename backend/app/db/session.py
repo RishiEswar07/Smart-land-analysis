@@ -48,9 +48,8 @@ def _build_engine() -> AsyncEngine:
         "connect_args": connect_args,
     }
 
-    # For transaction poolers (port 6543), use NullPool to avoid double connection pooling.
-    # For local/direct connections, use pre-ping and connection recycling.
-    if is_supabase_pooler:
+    # For remote databases / transaction poolers, use NullPool to prevent PgBouncer prepared statement collisions
+    if is_supabase_pooler or is_remote:
         engine_kwargs["poolclass"] = NullPool
     else:
         engine_kwargs["pool_pre_ping"] = True

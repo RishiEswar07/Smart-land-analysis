@@ -115,12 +115,16 @@ function DetailedLandAnalysisModalContent({
     setFacilityRadius(5.0)
     setLoadingFacilities(false)
 
+    if (initialData) {
+      setData(initialData)
+    } else {
+      setData(null)
+    }
+
     if (analysisId) {
       fetchDetailedData(analysisId)
-    } else if (initialData) {
-      setData(initialData)
     }
-  }, [isOpen, analysisId, fetchDetailedData])
+  }, [isOpen, analysisId, initialData, fetchDetailedData])
 
   // Close on Escape key
   useEffect(() => {

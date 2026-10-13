@@ -3,6 +3,7 @@ import { Routes, Route } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
 import MainLayout from './layouts/MainLayout'
+import ErrorBoundary from './components/ErrorBoundary'
 import Home from './pages/Home'
 import Login from './pages/Login'
 import Register from './pages/Register'
@@ -19,7 +20,8 @@ export default function App() {
   }, [])
 
   return (
-    <AuthProvider>
+    <ErrorBoundary>
+      <AuthProvider>
       <Routes>
         <Route element={<MainLayout />}>
           <Route path="/" element={<Home />} />
@@ -48,5 +50,6 @@ export default function App() {
         </Route>
       </Routes>
     </AuthProvider>
+    </ErrorBoundary>
   )
 }
