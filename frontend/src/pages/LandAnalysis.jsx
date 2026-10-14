@@ -34,6 +34,33 @@ const MIN_AREA_REQUIREMENTS = {
   'Residential House': { min: 400, reason: 'Residential House requires at least 400 sq.ft to meet standard residential habitability and setback codes.', rec: 'None' }
 };
 
+class House3DErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidCatch(error, errorInfo) {
+    console.warn("House3DModel 3D render caught error:", error, errorInfo);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="w-full h-full bg-slate-100 flex flex-col items-center justify-center p-6 text-center text-slate-600 rounded-xl border border-slate-200">
+          <span className="text-3xl mb-2">🏛️</span>
+          <p className="font-semibold text-sm text-slate-800">Architectural Concept Visualization</p>
+          <p className="text-xs text-slate-500 mt-1 max-w-sm">
+            Interactive 3D model could not be displayed due to browser WebGL limitations. Analysis metrics and reports remain fully accessible.
+          </p>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function LandAnalysis() {
   const { position: defaultCenter } = useGeolocation()
 
@@ -963,7 +990,7 @@ export default function LandAnalysis() {
                   <div>
                     <h2 className="text-2xl font-black text-slate-800">Architectural Concept</h2>
                     <p className="text-slate-500 text-sm mt-1">
-                      {feasibility.suitable 
+                      {feasibility?.suitable 
                         ? 'Procedurally generated 3D concept based on actual GIS footprint.'
                         : 'Visualizing recommended alternative architecture.'}
                     </p>
@@ -971,10 +998,12 @@ export default function LandAnalysis() {
                 </div>
 
                 <div className="h-[600px] w-full rounded-xl overflow-hidden shadow-card border border-slate-200">
-                  <House3DModel 
-                    landAreaSqFt={gisData.area_sqft || (manualArea ? parseFloat(manualArea) : 1000)} 
-                    buildingType={feasibility.suitable ? selectedBuildingType : (feasibility.rec || 'Residential House')}
-                  />
+                  <House3DErrorBoundary>
+                    <House3DModel 
+                      landAreaSqFt={gisData?.area_sqft || (manualArea ? parseFloat(manualArea) : 1000)} 
+                      buildingType={feasibility?.suitable ? selectedBuildingType : (feasibility?.rec || 'Residential House')}
+                    />
+                  </House3DErrorBoundary>
                 </div>
               </div>
 
@@ -1010,23 +1039,23 @@ export default function LandAnalysis() {
                         property_info: {
                           land_name: gisData?.address || 'Selected Parcel',
                           selected_building_type: selectedBuildingType,
-                          area_sqft: gisData?.area_sqft || (manualArea ? parseFloat(manualArea) : 2400),
-                          area_source: areaSource === 'direct_input' ? 'direct_input' : 'polygon',
-                          road_width_ft: gisData?.road_width_ft || 20,
+                          area_sqft: Number(gisData?.area_sqft) || (manualArea ? parseFloat(manualArea) : 2400),
+                          area_source: (gisData?.area_source || (areaInputMode === 'direct' ? 'direct_input' : 'polygon')) === 'direct_input' ? 'direct_input' : 'polygon',
+                          road_width_ft: gisData?.road_width || gisData?.road_width_ft || 20,
                           soil_type: gisData?.soil_type || 'Red Soil',
                           land_type: gisData?.land_type || 'Residential',
-                          latitude: gisData?.lat,
-                          longitude: gisData?.lng,
+                          latitude: gisData?.lat ?? clickedLocation?.lat,
+                          longitude: gisData?.lng ?? clickedLocation?.lng,
                         },
                         suitability: {
-                          score: result.suitability_score,
-                          rating: result.suitability_score >= 70 ? 'Highly Suitable' : result.suitability_score >= 50 ? 'Moderately Suitable' : 'Unsuitable',
-                          risk_score: result.risk_score,
-                          risk_level: result.risk_level,
+                          score: result.suitability_score ?? 0,
+                          rating: (result.suitability_score ?? 0) >= 70 ? 'Highly Suitable' : (result.suitability_score ?? 0) >= 50 ? 'Moderately Suitable' : 'Unsuitable',
+                          risk_score: result.risk_score ?? 0,
+                          risk_level: result.risk_level ?? 'Low',
                         },
                         recommendation: {
                           building_type: result.recommended_building_type || selectedBuildingType,
-                          ai_explanation: result.ai_explanation,
+                          ai_explanation: result.ai_explanation || '',
                         },
                       }
                     : null

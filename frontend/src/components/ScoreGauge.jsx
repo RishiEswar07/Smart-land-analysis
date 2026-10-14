@@ -19,8 +19,9 @@ function bandLabel(score) {
 }
 
 export default function ScoreGauge({ score = 0, size = 180 }) {
-  const color = bandColor(score)
-  const data = [{ name: 'score', value: score, fill: color }]
+  const safeScore = Number.isFinite(Number(score)) ? Math.max(0, Math.min(100, Number(score))) : 0
+  const color = bandColor(safeScore)
+  const data = [{ name: 'score', value: safeScore, fill: color }]
 
   return (
     <div className="flex flex-col items-center" style={{ width: size }}>
@@ -40,9 +41,9 @@ export default function ScoreGauge({ score = 0, size = 180 }) {
         <RadialBar background={{ fill: '#EEF2F7' }} dataKey="value" cornerRadius={20} />
       </RadialBarChart>
       <div className="-mt-[104px] flex flex-col items-center pointer-events-none">
-        <span className="text-3xl font-display font-extrabold text-ink">{Math.round(score)}%</span>
+        <span className="text-3xl font-display font-extrabold text-ink">{Math.round(safeScore)}%</span>
         <span className="text-xs font-semibold mt-1" style={{ color }}>
-          {bandLabel(score)}
+          {bandLabel(safeScore)}
         </span>
       </div>
       <div className="mt-2" />

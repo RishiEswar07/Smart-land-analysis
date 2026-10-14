@@ -4,6 +4,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 
 export default function House3DModel({ landAreaSqFt = 1500, buildingType = 'Individual House' }) {
   const mountRef = useRef(null)
+  const [webglError, setWebglError] = useState(false)
   
   const [stats, setStats] = useState({
     landAreaSqFt: 0,
@@ -27,15 +28,22 @@ export default function House3DModel({ landAreaSqFt = 1500, buildingType = 'Indi
     scene.background = new THREE.Color('#E2E8F0');
     scene.fog = new THREE.FogExp2('#E2E8F0', 0.012);
 
-    const width = mountRef.current.clientWidth;
-    const height = mountRef.current.clientHeight;
+    const width = mountRef.current.clientWidth || 600;
+    const height = mountRef.current.clientHeight || 400;
     const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
     
     camera.position.set(plotSize * 1.6, plotSize * 1.2 + 6, plotSize * 1.6);
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    let renderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    } catch (e) {
+      console.warn("WebGL initialization failed:", e);
+      setWebglError(true);
+      return;
+    }
     renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -392,6 +400,36 @@ export default function House3DModel({ landAreaSqFt = 1500, buildingType = 'Indi
       scene.clear();
     };
   }, [landAreaSqFt, buildingType]);
+
+  if (webglError) {
+    return (
+      <div className="w-full h-full relative bg-slate-100 rounded-xl overflow-hidden shadow-inner border border-slate-200 flex flex-col items-center justify-center p-6 text-center">
+        <span className="text-4xl mb-3">🏛️</span>
+        <h4 className="text-base font-bold text-slate-800">Architectural Concept Overview</h4>
+        <p className="text-xs text-slate-500 max-w-md mt-1 mb-6">
+          Interactive 3D viewport could not be loaded. The procedural architectural plan for this {buildingType} is calculated below.
+        </p>
+        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm max-w-sm w-full text-xs space-y-2.5">
+          <div className="flex justify-between border-b border-slate-100 pb-2">
+            <span className="text-slate-500 font-semibold">Parcel Area:</span>
+            <span className="font-bold text-slate-800">{Math.round(Number(landAreaSqFt) || 1500).toLocaleString()} sq.ft</span>
+          </div>
+          <div className="flex justify-between border-b border-slate-100 pb-2">
+            <span className="text-slate-500 font-semibold">Estimated Footprint:</span>
+            <span className="font-bold text-blue-600">{Math.round((Number(landAreaSqFt) || 1500) * 0.45).toLocaleString()} sq.ft</span>
+          </div>
+          <div className="flex justify-between border-b border-slate-100 pb-2">
+            <span className="text-slate-500 font-semibold">Open Setback Area:</span>
+            <span className="font-bold text-emerald-600">{Math.round((Number(landAreaSqFt) || 1500) * 0.55).toLocaleString()} sq.ft</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-slate-500 font-semibold">Building Type:</span>
+            <span className="font-bold text-slate-700">{buildingType}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full h-full relative bg-[#E2E8F0] rounded-xl overflow-hidden shadow-inner border border-slate-200">
