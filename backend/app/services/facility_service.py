@@ -30,9 +30,9 @@ logger = logging.getLogger(__name__)
 
 # Primary and fallback Overpass API endpoints (Global high-availability mirrors)
 OVERPASS_ENDPOINTS = [
-    "https://z.overpass-api.de/api/interpreter",
     "https://overpass-api.de/api/interpreter",
     "https://lz4.overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
 ]
 
 # In-memory cache keyed by (lat_4dec, lng_4dec, radius_km)
@@ -128,6 +128,7 @@ async def _query_single_nominatim_term(
     """Helper to query a single term in OpenStreetMap Nominatim within viewbox with retries."""
     found: List[Dict[str, Any]] = []
     url = f"https://nominatim.openstreetmap.org/search?q={term}&format=json&bounded=1&viewbox={viewbox}&limit=5"
+    max_allowed_dist = 50.0 if cat_key == "airports" else (radius_km * 1.5)
 
     async with sem:
         for attempt in range(2):
@@ -142,7 +143,7 @@ async def _query_single_nominatim_term(
                             continue
 
                         d_km = haversine_distance_km(lat, lng, it_lat, it_lon)
-                        if d_km <= radius_km * 1.5:
+                        if d_km <= max_allowed_dist:
                             raw_name = it.get("display_name", "").split(",")[0].strip()
                             name = raw_name or term.title()
                             found.append({
@@ -167,7 +168,7 @@ async def _query_single_nominatim_term(
                 if attempt == 0:
                     await asyncio.sleep(0.3)
             # Gentle inter-request pacing
-            await asyncio.sleep(0.08)
+            await asyncio.sleep(0.1)
 
     return found
 
@@ -178,7 +179,7 @@ async def _fetch_from_nominatim_fallback(
     """
     High-reliability fallback: Queries OpenStreetMap Nominatim search
     bounded by the search bounding box when Overpass mirrors encounter timeouts or rate limits.
-    Runs category searches with controlled concurrency (sem=3) to respect rate limits.
+    Runs category searches with controlled concurrency (sem=2) to respect rate limits.
     """
     delta_lat = radius_km / 111.0
     delta_lng = radius_km / (111.0 * max(0.1, math.cos(math.radians(lat))))
@@ -186,32 +187,39 @@ async def _fetch_from_nominatim_fallback(
     max_lng = lng + delta_lng
     min_lat = lat - delta_lat
     max_lat = lat + delta_lat
-    viewbox = f"{min_lng:.5f},{max_lat:.5f},{max_lng:.5f},{min_lat:.5f}"
+    viewbox_local = f"{min_lng:.5f},{max_lat:.5f},{max_lng:.5f},{min_lat:.5f}"
+
+    # Expanded viewbox for regional transit infrastructure (Airports)
+    transit_r_km = max(radius_km, 35.0)
+    delta_lat_t = transit_r_km / 111.0
+    delta_lng_t = transit_r_km / (111.0 * max(0.1, math.cos(math.radians(lat))))
+    viewbox_transit = f"{lng - delta_lng_t:.5f},{lat + delta_lat_t:.5f},{lng + delta_lng_t:.5f},{lat - delta_lat_t:.5f}"
 
     queries = {
         "bus_stands": [("bus station", "Bus Stand / Station"), ("bus stop", "Local Bus Stop")],
         "railway_stations": [("railway station", "Railway Station")],
         "airports": [("airport", "Airport / Aviation")],
-        "hospitals": [("hospital", "Hospital / Clinic")],
-        "schools": [("school", "School / College")],
+        "hospitals": [("hospital", "Hospital / Clinic"), ("clinic", "Healthcare Clinic")],
+        "schools": [("school", "School / College"), ("college", "Higher Education / College")],
         "commercial": [("shopping mall", "Commercial / Shopping"), ("supermarket", "Commercial / Retail")],
         "roads": [("Main Road", "Road Network"), ("High Road", "Road Network"), ("Salai", "Road Network")],
-        "water_bodies": [("river", "Hydrology / River"), ("canal", "Hydrology / Canal"), ("lake", "Hydrology / Water Body")],
+        "water_bodies": [("river", "Hydrology / River"), ("lake", "Hydrology / Water Body"), ("canal", "Hydrology / Canal")],
     }
 
     headers = {
         "User-Agent": "SmartLandAnalysis/2.0 (Academic Geospatial Research; contact@smartland.edu)"
     }
     results: Dict[str, List[Dict[str, Any]]] = {k: [] for k in queries}
-    sem = asyncio.Semaphore(3)
+    sem = asyncio.Semaphore(2)
 
     tasks = []
     async with httpx.AsyncClient(timeout=8.0) as client:
         for cat_key, term_list in queries.items():
+            vb = viewbox_transit if cat_key == "airports" else viewbox_local
             for term, cat_label in term_list:
                 tasks.append(
                     _query_single_nominatim_term(
-                        client, sem, term, cat_label, cat_key, viewbox, lat, lng, radius_km, headers
+                        client, sem, term, cat_label, cat_key, vb, lat, lng, radius_km, headers
                     )
                 )
 
@@ -233,20 +241,20 @@ async def _execute_fetch(
 ) -> Dict[str, Any]:
     """Internal implementation of geospatial facility lookup."""
     local_m = int(radius_km * 1000)
-    transit_radius_m = int(max(local_m, 20000))
+    transit_radius_m = int(max(local_m, 35000))
     bus_stop_m = int(min(local_m, 2500))
 
     query = f"""
     [out:json][timeout:8];
     (
-      node["amenity"~"bus_station|hospital|clinic|school|college|university"](around:{local_m},{lat},{lng});
+      nwr["amenity"~"bus_station|hospital|clinic|school|college|university"](around:{local_m},{lat},{lng});
       node["highway"="bus_stop"](around:{bus_stop_m},{lat},{lng});
-      node["railway"~"station|halt"](around:{local_m},{lat},{lng});
-      node["aeroway"~"aerodrome|terminal"](around:{transit_radius_m},{lat},{lng});
-      node["shop"~"supermarket|mall|department_store|convenience"](around:{local_m},{lat},{lng});
-      way["highway"~"motorway|trunk|primary|secondary"](around:1000,{lat},{lng});
-      way["waterway"~"river|canal"](around:2000,{lat},{lng});
-      way["natural"="water"](around:2000,{lat},{lng});
+      nwr["railway"~"station|halt"](around:{local_m},{lat},{lng});
+      nwr["aeroway"~"aerodrome|terminal"](around:{transit_radius_m},{lat},{lng});
+      nwr["shop"~"supermarket|mall|department_store|convenience"](around:{local_m},{lat},{lng});
+      way["highway"~"motorway|trunk|primary|secondary"](around:1500,{lat},{lng});
+      way["waterway"~"river|canal"](around:2500,{lat},{lng});
+      way["natural"="water"](around:2500,{lat},{lng});
     );
     out center 120;
     """
@@ -262,14 +270,15 @@ async def _execute_fetch(
     for endpoint in OVERPASS_ENDPOINTS:
         try:
             logger.info(f"Connecting to Overpass endpoint: {endpoint}")
-            async with httpx.AsyncClient(timeout=4.0) as client:
+            async with httpx.AsyncClient(timeout=3.0) as client:
                 resp = await client.post(endpoint, data={"data": query}, headers=headers)
                 if resp.status_code == 200:
                     data = resp.json()
                     elements = data.get("elements", [])
-                    overpass_succeeded = True
-                    logger.info(f"Overpass success from {endpoint}: {len(elements)} elements retrieved")
-                    break
+                    if len(elements) > 0:
+                        overpass_succeeded = True
+                        logger.info(f"Overpass success from {endpoint}: {len(elements)} elements retrieved")
+                        break
                 else:
                     logger.warning(f"Overpass endpoint {endpoint} returned status {resp.status_code}")
         except Exception as exc:

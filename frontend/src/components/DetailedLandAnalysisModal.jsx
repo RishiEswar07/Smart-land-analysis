@@ -163,9 +163,9 @@ function DetailedLandAnalysisModalContent({
 
     try {
       let res = null
-      const lat = prop.latitude ?? data?.latitude
-      const lng = prop.longitude ?? data?.longitude
-      const landId = prop.land_id ?? prop.id ?? data?.land_id
+      const lat = prop.latitude ?? data?.latitude ?? data?.property_info?.latitude
+      const lng = prop.longitude ?? data?.longitude ?? data?.property_info?.longitude
+      const landId = prop.land_id ?? prop.id ?? data?.land_id ?? data?.property_info?.land_id
 
       if (landId) {
         res = await landService.getNearbyFacilities(landId, radius)
@@ -193,7 +193,7 @@ function DetailedLandAnalysisModalContent({
     if (!isOpen || !data) return
     const fac = customFacilities || data?.nearby_facilities
     const count = fac?.total_facilities_found ?? fac?.total_found ?? (Array.isArray(fac?.all_facilities) ? fac.all_facilities.length : 0)
-    if (!customFacilities && (!fac || count === 0)) {
+    if (!customFacilities && (!fac || (count === 0 && fac?.status !== 'success'))) {
       handleRadiusChange(facilityRadius || 5.0, true)
     }
   }, [isOpen, data])
@@ -739,13 +739,15 @@ function DetailedLandAnalysisModalContent({
                   </div>
                 )}
 
-                {loadingFacilities ? (
+                {loadingFacilities || (!facilities && loading) ? (
                   <div className="p-8 text-center bg-slate-50 border border-slate-200 rounded-xl my-2">
                     <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
                     <p className="text-xs font-semibold text-slate-700">Analyzing nearby facilities ({facilityRadius} km)...</p>
                     <p className="text-[11px] text-slate-400 mt-0.5">Computing geodesic straight-line proximity</p>
                   </div>
                 ) : (() => {
+                  const isUnavailable = facilities?.status === 'unavailable'
+                  const isPending = !facilities || loadingFacilities
                   const catObj = (facilities && typeof facilities === 'object') ? (facilities.categories || facilities) : {}
                   const toArray = (v) => (Array.isArray(v) ? v : [])
                   const facilityCategories = [
@@ -777,7 +779,13 @@ function DetailedLandAnalysisModalContent({
                                 </div>
 
                                 {count === 0 ? (
-                                  <p className="text-[11px] text-slate-400 italic mt-2">No records within search radius</p>
+                                  isUnavailable ? (
+                                    <p className="text-[11px] text-amber-600/80 italic mt-2">Data temporarily busy</p>
+                                  ) : isPending ? (
+                                    <p className="text-[11px] text-slate-400 italic mt-2">Checking proximity records...</p>
+                                  ) : (
+                                    <p className="text-[11px] text-slate-400 italic mt-2">No records within search radius</p>
+                                  )
                                 ) : (
                                   <div className="space-y-1.5 mt-2">
                                     {cat.items.slice(0, 2).map((item, iIdx) => {

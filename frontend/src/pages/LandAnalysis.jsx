@@ -1036,7 +1036,13 @@ export default function LandAnalysis() {
                 initialData={
                   result
                     ? {
+                        id: result.id,
+                        land_id: result.land_id,
+                        latitude: gisData?.lat ?? clickedLocation?.lat,
+                        longitude: gisData?.lng ?? clickedLocation?.lng,
                         property_info: {
+                          id: result.land_id,
+                          land_id: result.land_id,
                           land_name: gisData?.address || 'Selected Parcel',
                           selected_building_type: selectedBuildingType,
                           area_sqft: Number(gisData?.area_sqft) || (manualArea ? parseFloat(manualArea) : 2400),

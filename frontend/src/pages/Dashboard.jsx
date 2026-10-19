@@ -119,20 +119,25 @@ export default function Dashboard() {
             <p className="text-xs text-slate-dim">Live geodesic proximity (km) from parcel centroid</p>
           </div>
         </div>
+        {facilities?.status === 'unavailable' && (
+          <div className="card-base p-3 mb-4 bg-amber-50/70 border-amber-200 text-xs text-amber-800 flex items-center justify-between">
+            <span>⚠️ Facility proximity service is busy. Showing available cached records or retry shortly.</span>
+          </div>
+        )}
         {loadingFacilities ? (
           <div className="card-base p-8 text-center">
             <Loader label="Evaluating nearby essential infrastructure…" />
           </div>
         ) : (
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <FacilityCard icon="🚌" title="Bus Stands & Stops" items={facilities?.bus_stands ?? facilities?.categories?.bus_stands ?? []} emptyLabel="No bus stops within radius" />
-            <FacilityCard icon="🚆" title="Railway Stations" items={facilities?.railway_stations ?? facilities?.categories?.railway_stations ?? []} emptyLabel="No stations within radius" />
-            <FacilityCard icon="✈️" title="Airports" items={facilities?.airports ?? facilities?.categories?.airports ?? []} emptyLabel="No airports within radius" />
-            <FacilityCard icon="🏥" title="Hospitals & Clinics" items={facilities?.hospitals ?? facilities?.categories?.hospitals ?? []} emptyLabel="No hospitals within radius" />
-            <FacilityCard icon="🏫" title="Schools & Colleges" items={facilities?.schools ?? facilities?.categories?.schools ?? []} emptyLabel="No schools within radius" />
-            <FacilityCard icon="🛍️" title="Commercial & Shopping" items={facilities?.commercial ?? facilities?.categories?.commercial ?? []} emptyLabel="No shops within radius" />
-            <FacilityCard icon="🛣️" title="Main Road Network" items={facilities?.roads ?? facilities?.categories?.roads ?? []} emptyLabel="No major highways adjacent" />
-            <FacilityCard icon="🌊" title="Water Bodies & Hydrology" items={facilities?.water_bodies ?? facilities?.categories?.water_bodies ?? []} emptyLabel="No water bodies within radius" />
+            <FacilityCard icon="🚌" title="Bus Stands & Stops" items={facilities?.bus_stands ?? facilities?.categories?.bus_stands ?? []} emptyLabel={facilities?.status === 'unavailable' ? "Data temporarily busy" : "No bus stops within radius"} />
+            <FacilityCard icon="🚆" title="Railway Stations" items={facilities?.railway_stations ?? facilities?.categories?.railway_stations ?? []} emptyLabel={facilities?.status === 'unavailable' ? "Data temporarily busy" : "No stations within radius"} />
+            <FacilityCard icon="✈️" title="Airports" items={facilities?.airports ?? facilities?.categories?.airports ?? []} emptyLabel={facilities?.status === 'unavailable' ? "Data temporarily busy" : "No airports within radius"} />
+            <FacilityCard icon="🏥" title="Hospitals & Clinics" items={facilities?.hospitals ?? facilities?.categories?.hospitals ?? []} emptyLabel={facilities?.status === 'unavailable' ? "Data temporarily busy" : "No hospitals within radius"} />
+            <FacilityCard icon="🏫" title="Schools & Colleges" items={facilities?.schools ?? facilities?.categories?.schools ?? []} emptyLabel={facilities?.status === 'unavailable' ? "Data temporarily busy" : "No schools within radius"} />
+            <FacilityCard icon="🛍️" title="Commercial & Shopping" items={facilities?.commercial ?? facilities?.categories?.commercial ?? []} emptyLabel={facilities?.status === 'unavailable' ? "Data temporarily busy" : "No shops within radius"} />
+            <FacilityCard icon="🛣️" title="Main Road Network" items={facilities?.roads ?? facilities?.categories?.roads ?? []} emptyLabel={facilities?.status === 'unavailable' ? "Data temporarily busy" : "No major highways adjacent"} />
+            <FacilityCard icon="🌊" title="Water Bodies & Hydrology" items={facilities?.water_bodies ?? facilities?.categories?.water_bodies ?? []} emptyLabel={facilities?.status === 'unavailable' ? "Data temporarily busy" : "No water bodies within radius"} />
           </div>
         )}
       </div>
