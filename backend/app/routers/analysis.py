@@ -18,11 +18,33 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.dependencies.auth import get_current_user
 from app.models.user import User
-from app.schemas.analysis import AnalysisPredictRequest, AnalysisResponse, DetailedAnalysisResponse
+from app.schemas.analysis import (
+    AnalysisHistoryResponse,
+    AnalysisPredictRequest,
+    AnalysisResponse,
+    DetailedAnalysisResponse,
+)
 from app.services import analysis_service
 from app.services.exceptions import NotFoundError
 
 router = APIRouter(prefix="/analysis", tags=["AI Suitability Analysis"])
+
+
+@router.get(
+    "/history",
+    response_model=AnalysisHistoryResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get user's past land suitability analyses",
+)
+async def get_history(
+    limit: int = 50,
+    offset: int = 0,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> AnalysisHistoryResponse:
+    """Fetches historical analyses with land metadata for the current user."""
+    data = await analysis_service.get_user_analysis_history(db, current_user.id, limit=limit, offset=offset)
+    return AnalysisHistoryResponse(**data)
 
 
 @router.post(

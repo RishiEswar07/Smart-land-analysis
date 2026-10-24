@@ -13,6 +13,8 @@ const analysisService = {
   getDetailedAnalysis: (id) => api.get(`/analysis/${id}/details`).then((res) => res.data),
 
   getAnalysesForLand: (landId) => api.get(`/lands/${landId}/analyses`).then((res) => res.data),
+
+  getHistory: (params) => api.get('/analysis/history', { params }).then((res) => res.data),
 }
 
 export default analysisService

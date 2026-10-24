@@ -233,13 +233,30 @@ const gisService = {
       out tags;
     `;
     
+    const mirrors = [
+      OVERPASS_API,
+      'https://lz4.overpass-api.de/api/interpreter',
+      'https://overpass.kumi.systems/api/interpreter'
+    ];
+
     try {
-      const response = await axios.post(OVERPASS_API, query);
-      const elements = response.data.elements || [];
+      let elements = [];
+      for (const mirror of mirrors) {
+        try {
+          const response = await axios.post(mirror, query, { timeout: 4000 });
+          if (response?.data?.elements) {
+            elements = response.data.elements;
+            break;
+          }
+        } catch (e) {
+          // Failover to next mirror
+        }
+      }
 
       let hasWater = false;
       let hasElec = false;
       let roadWidth = null;
+      let isRoadWidthEstimated = false;
 
       elements.forEach(e => {
         const tags = e.tags || {};
@@ -247,13 +264,28 @@ const gisService = {
         if (tags.waterway || tags.amenity === 'drinking_water' || tags.amenity === 'water_point') hasWater = true;
         
         if (tags.highway && roadWidth === null) {
-          // Estimate road width in feet based on highway type
-          const hw = tags.highway;
-          if (hw === 'primary' || hw === 'trunk') roadWidth = 60;
-          else if (hw === 'secondary') roadWidth = 40;
-          else if (hw === 'tertiary') roadWidth = 30;
-          else if (hw === 'residential') roadWidth = 20;
-          else roadWidth = 15; // default fallback
+          // Check explicit OSM width tags first
+          const rawW = tags.width || tags.est_width || tags['width:carriageway'];
+          if (rawW) {
+            const parsed = parseFloat(rawW);
+            if (!isNaN(parsed) && parsed > 0) {
+              const isFeet = String(rawW).toLowerCase().includes('ft') || parsed > 35;
+              roadWidth = isFeet ? Math.round(parsed) : Math.round(parsed * 3.28084);
+              isRoadWidthEstimated = false;
+            }
+          }
+
+          if (roadWidth === null) {
+            // Evaluated standard corridor width based on highway classification
+            const hw = tags.highway;
+            if (hw === 'motorway' || hw === 'trunk') roadWidth = 60;
+            else if (hw === 'primary') roadWidth = 50;
+            else if (hw === 'secondary') roadWidth = 40;
+            else if (hw === 'tertiary') roadWidth = 30;
+            else if (hw === 'residential' || hw === 'living_street') roadWidth = 24;
+            else if (hw === 'service' || hw === 'track') roadWidth = 15;
+            isRoadWidthEstimated = true;
+          }
         }
       });
 
@@ -261,7 +293,8 @@ const gisService = {
         available: true,
         water: hasWater,
         electricity: hasElec,
-        roadWidth: roadWidth
+        roadWidth: roadWidth,
+        isRoadWidthEstimated: isRoadWidthEstimated,
       };
     } catch (error) {
       console.error('Overpass infrastructure fetch error:', error);

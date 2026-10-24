@@ -8,6 +8,8 @@ import Home from './pages/Home'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import LandAnalysis from './pages/LandAnalysis'
+import BuildingTypeSelection from './pages/BuildingTypeSelection'
+import History from './pages/History'
 import Dashboard from './pages/Dashboard'
 import Reports from './pages/Reports'
 import About from './pages/About'
@@ -32,7 +34,9 @@ export default function App() {
           {/* Protected — require login. Unauthenticated visitors are
               redirected to /login and sent back here after signing in. */}
           <Route element={<ProtectedRoute />}>
+            <Route path="/building-type" element={<BuildingTypeSelection />} />
             <Route path="/land-analysis" element={<LandAnalysis />} />
+            <Route path="/history" element={<History />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/reports" element={<Reports />} />
           </Route>

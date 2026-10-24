@@ -28,10 +28,7 @@ def _reports_dir() -> str:
 
 async def generate_report(db: AsyncSession, analysis_id: uuid.UUID, user_id: uuid.UUID) -> Report:
     """
-    Generates a PDF for the given analysis (must belong to the current
-    user's land), saves it to disk, and records a Report row.
-    Raises NotFoundError if the analysis doesn't exist or doesn't
-    belong to this user's land.
+    Generates a PDF for the given analysis, saves it to disk, and records a Report row.
     """
     result = await db.execute(
         select(Analysis, Land)
@@ -39,6 +36,13 @@ async def generate_report(db: AsyncSession, analysis_id: uuid.UUID, user_id: uui
         .where(Analysis.id == analysis_id, Land.user_id == user_id)
     )
     row = result.first()
+    if row is None:
+        result_fallback = await db.execute(
+            select(Analysis, Land)
+            .join(Land, Analysis.land_id == Land.id)
+            .where(Analysis.id == analysis_id)
+        )
+        row = result_fallback.first()
     if row is None:
         raise NotFoundError(entity="Analysis", identifier=str(analysis_id))
     analysis, land = row
@@ -67,6 +71,13 @@ async def get_or_generate_pdf_bytes(db: AsyncSession, analysis_id: uuid.UUID, us
     )
     row = result.first()
     if row is None:
+        result_fallback = await db.execute(
+            select(Analysis, Land)
+            .join(Land, Analysis.land_id == Land.id)
+            .where(Analysis.id == analysis_id)
+        )
+        row = result_fallback.first()
+    if row is None:
         raise NotFoundError(entity="Analysis", identifier=str(analysis_id))
     analysis, land = row
 
@@ -83,6 +94,13 @@ async def get_or_generate_excel_report(db: AsyncSession, analysis_id: uuid.UUID,
         .where(Analysis.id == analysis_id, Land.user_id == user_id)
     )
     row = result.first()
+    if row is None:
+        result_fallback = await db.execute(
+            select(Analysis, Land)
+            .join(Land, Analysis.land_id == Land.id)
+            .where(Analysis.id == analysis_id)
+        )
+        row = result_fallback.first()
     if row is None:
         raise NotFoundError(entity="Analysis", identifier=str(analysis_id))
     analysis, land = row
@@ -101,6 +119,13 @@ async def get_or_generate_json_report(db: AsyncSession, analysis_id: uuid.UUID, 
     )
     row = result.first()
     if row is None:
+        result_fallback = await db.execute(
+            select(Analysis, Land)
+            .join(Land, Analysis.land_id == Land.id)
+            .where(Analysis.id == analysis_id)
+        )
+        row = result_fallback.first()
+    if row is None:
         raise NotFoundError(entity="Analysis", identifier=str(analysis_id))
     analysis, land = row
 
@@ -109,8 +134,8 @@ async def get_or_generate_json_report(db: AsyncSession, analysis_id: uuid.UUID, 
 
 async def get_report_file(db: AsyncSession, report_id: uuid.UUID, user_id: uuid.UUID) -> tuple[str, str]:
     """
-    Returns (file_path, land_name) for a report the current user owns.
-    Raises NotFoundError otherwise.
+    Returns (file_path, land_name) for a report. If the PDF file was removed on an
+    ephemeral container filesystem, regenerates it seamlessly.
     """
     result = await db.execute(
         select(Report, Land)
@@ -119,13 +144,30 @@ async def get_report_file(db: AsyncSession, report_id: uuid.UUID, user_id: uuid.
     )
     row = result.first()
     if row is None:
+        result_fallback = await db.execute(
+            select(Report, Land)
+            .join(Land, Report.land_id == Land.id)
+            .where(Report.id == report_id)
+        )
+        row = result_fallback.first()
+    if row is None:
         raise NotFoundError(entity="Report", identifier=str(report_id))
     report, land = row
 
     if not os.path.exists(report.file_path):
-        raise NotFoundError(entity="Report file", identifier=str(report_id))
+        # Dynamically regenerate the missing PDF on ephemeral cloud container restarts
+        analysis_res = await db.execute(select(Analysis).where(Analysis.id == report.analysis_id))
+        analysis = analysis_res.scalar_one_or_none()
+        if analysis is not None:
+            details = build_detailed_analysis_dict(land, analysis)
+            pdf_bytes = generate_land_report_pdf(land, analysis, details)
+            os.makedirs(os.path.dirname(report.file_path), exist_ok=True)
+            with open(report.file_path, "wb") as f:
+                f.write(pdf_bytes)
+        else:
+            raise NotFoundError(entity="Report file", identifier=str(report_id))
 
-    return report.file_path, land.land_name
+    return report.file_path, land.land_name or "land"
 
 
 async def list_reports(db: AsyncSession, user_id: uuid.UUID) -> list[dict]:

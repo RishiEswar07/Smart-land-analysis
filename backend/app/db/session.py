@@ -11,6 +11,7 @@ PgBouncer / Supavisor transaction pooler).
 """
 
 import ssl
+import uuid
 from typing import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import (
@@ -29,10 +30,10 @@ def _build_engine() -> AsyncEngine:
     is_remote = not any(loc in db_url for loc in ["localhost", "127.0.0.1", "host.docker.internal"])
     is_supabase_pooler = ":6543" in db_url or "pooler.supabase.com" in db_url
 
-    # Prepared statements MUST be disabled for PgBouncer / Supabase port 6543 transaction pooling
+    # Prepared statements MUST use unique names and statement cache 0 for PgBouncer / Supabase transaction pooling
     connect_args: dict = {
         "statement_cache_size": 0,
-        "prepared_statement_cache_size": 0,
+        "prepared_statement_name_func": lambda: f"__stmt_{uuid.uuid4().hex}__",
     }
 
     # Automatically configure SSL context for remote PostgreSQL (Supabase / Render)

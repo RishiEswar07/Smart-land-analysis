@@ -7,7 +7,7 @@ export default function Login() {
   const { login } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
-  const redirectTo = location.state?.from || '/dashboard'
+  const redirectTo = location.state?.from || '/building-type'
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -16,6 +16,7 @@ export default function Login() {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+    if (submitting) return
     setError(null)
     setSubmitting(true)
     try {

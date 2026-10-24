@@ -10,7 +10,7 @@ contract both sides were already built against.
 
 import uuid
 from datetime import datetime
-from typing import Dict
+from typing import Any, Dict
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -50,7 +50,7 @@ class AnalysisResponse(BaseModel):
 
     risk_score: float = Field(..., ge=0, le=100)
     risk_level: str
-    risk_breakdown: Dict[str, RiskFactorScore]
+    risk_breakdown: Dict[str, Any]
 
     ai_explanation: str
 
@@ -106,4 +106,32 @@ class DetailedAnalysisResponse(BaseModel):
     disclaimer: str
 
     model_config = ConfigDict(from_attributes=True, extra="ignore")
+
+
+class AnalysisHistoryItem(BaseModel):
+    """Summary item for user's past land suitability analyses."""
+    id: uuid.UUID
+    land_id: uuid.UUID
+    land_name: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    area_sqft: float | None = None
+    land_type: str | None = None
+    suitability_score: float
+    recommended_building_type: str
+    risk_score: float
+    risk_level: str
+    flood_risk: str
+    environmental_risk: str
+    infrastructure_score: float
+    traffic_accessibility_score: float
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AnalysisHistoryResponse(BaseModel):
+    """Paginated or listed history response."""
+    items: list[AnalysisHistoryItem]
+    total: int
 

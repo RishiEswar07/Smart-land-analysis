@@ -424,7 +424,7 @@ function DetailedLandAnalysisModalContent({
                     <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
                       <span className="text-slate-400 block text-[10px]">Road Width</span>
                       <span className="font-semibold text-slate-800">
-                        {prop.road_width_ft ? `${prop.road_width_ft} ft` : '20 ft (Standard)'}
+                        {prop.road_width_ft ? `${prop.road_width_ft} ft` : 'Width data unavailable'}
                       </span>
                     </div>
                     <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">

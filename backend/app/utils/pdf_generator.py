@@ -349,10 +349,15 @@ def generate_land_report_pdf(land: Land, analysis: Analysis, details: dict | Non
         # Include top 8 facilities across all categories
         for f in fac_all[:8]:
             d_km = f.get("distance_km") or f.get("distanceKm", 0.0)
+            try:
+                d_km_val = float(d_km)
+                d_str = f"<b>{d_km_val:.2f} km</b>"
+            except (ValueError, TypeError):
+                d_str = f"<b>{d_km}</b>"
             fac_rows.append([
                 Paragraph(f.get("category", "General"), bold_value_style),
                 Paragraph(f.get("name", "Unnamed Facility"), value_style),
-                Paragraph(f"<b>{d_km:.2f} km</b>", bold_value_style),
+                Paragraph(d_str, bold_value_style),
                 Paragraph(f.get("status", "Verified Proximity"), value_style),
             ])
         fac_table = Table(fac_rows, colWidths=[4.5 * cm, 6.0 * cm, 3.0 * cm, 5.1 * cm])

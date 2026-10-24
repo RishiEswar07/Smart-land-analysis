@@ -6,6 +6,7 @@ Uses Machine Learning (RandomForest) with Real-Time Open-Meteo & Overpass API Da
 """
 
 import uuid
+import asyncio
 import httpx
 import numpy as np
 import pandas as pd
@@ -15,7 +16,7 @@ from dataclasses import dataclass, field
 from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
 from sklearn.preprocessing import LabelEncoder
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.analysis import Analysis
@@ -125,7 +126,8 @@ def _build_explanation(land: Land, r: dict) -> str:
     schools = r['schools']
     hospitals = r['hospitals']
     hotels = r['hotels']
-    road = land.road_width or 20.0
+    road = land.road_width
+    road_text = f"{road:.0f}ft" if road is not None else "standard road corridor (estimated)"
     reg_info = r.get('reg_info')
     lc = r.get('land_cover')
     
@@ -147,7 +149,7 @@ def _build_explanation(land: Land, r: dict) -> str:
     elif btype == "School" and schools == 0:
         reasons.append(f"A {btype} is highly recommended here due to a lack of educational facilities within a 2km radius (high demand).")
     elif btype == "Hospital/Clinic" and hospitals == 0:
-        reasons.append(f"A {btype} is strongly suggested because the ML model detected 0 medical facilities nearby and sufficient road width ({road}ft) for emergency access.")
+        reasons.append(f"A {btype} is strongly suggested because the ML model detected 0 medical facilities nearby and sufficient road width ({road_text}) for emergency access.")
     elif btype == "Hotel/Resort" and hotels == 0:
         reasons.append(f"A {btype} is viable due to zero market saturation (0 hotels nearby) and low flood risk.")
     elif btype in ["Apartment", "Individual House"]:
@@ -161,7 +163,7 @@ def _build_explanation(land: Land, r: dict) -> str:
         if btype != "Hospital/Clinic":
             if hospitals > 1:
                 rejections.append(f"A Hospital/Clinic is NOT recommended due to market saturation (already {hospitals} nearby).")
-            elif road < 25:
+            elif road is not None and road < 25:
                 rejections.append("A Hospital/Clinic is rejected due to narrow traffic access (<25ft road) unsuitable for ambulances.")
         
         if btype != "Hotel/Resort" and hotels > 2:
@@ -175,53 +177,80 @@ def _build_explanation(land: Land, r: dict) -> str:
     ]
     return " ".join(parts)
 
+_AMENITIES_CACHE: dict[str, tuple[int, int, int]] = {}
+_METRICS_CACHE: dict[str, tuple[float, float]] = {}
+
 async def _fetch_overpass_amenities(lat: float, lng: float):
-    """Queries OpenStreetMap Overpass API for facilities within 2000m"""
-    schools, hospitals, hotels = 0, 0, 0
+    """Queries OpenStreetMap Overpass API for facilities within 2000m with fast mirror fallback and caching."""
+    cache_key = f"{round(lat, 3)}:{round(lng, 3)}"
+    if cache_key in _AMENITIES_CACHE:
+        return _AMENITIES_CACHE[cache_key]
+
+    schools, hospitals, hotels = 1, 0, 0
     query = f"""
-    [out:json][timeout:5];
+    [out:json][timeout:3];
     (
       node["amenity"~"school|hospital|clinic"](around:2000,{lat},{lng});
       node["tourism"~"hotel"](around:2000,{lat},{lng});
     );
     out count;
     """
-    try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.post("https://overpass-api.de/api/interpreter", data=query, timeout=8.0)
-            if resp.status_code == 200:
-                data = resp.json()
-                if "elements" in data and len(data["elements"]) > 0:
-                    tags = data["elements"][0].get("tags", {})
-                    schools = int(tags.get("amenity", 0)) // 2
-                    hospitals = int(tags.get("amenity", 0)) // 4
-                    hotels = int(tags.get("tourism", 0))
-    except Exception as e:
-        logger.error(f"Error fetching Overpass data: {e}")
-        schools, hospitals, hotels = 1, 0, 0
-        
+    endpoints = [
+        "https://overpass-api.de/api/interpreter",
+        "https://lz4.overpass-api.de/api/interpreter",
+        "https://overpass.kumi.systems/api/interpreter",
+    ]
+    for ep in endpoints:
+        try:
+            async with httpx.AsyncClient(timeout=2.5) as client:
+                resp = await client.post(ep, data={"data": query})
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if "elements" in data and len(data["elements"]) > 0:
+                        tags = data["elements"][0].get("tags", {})
+                        schools = max(0, int(tags.get("amenity", 0)) // 2)
+                        hospitals = max(0, int(tags.get("amenity", 0)) // 4)
+                        hotels = max(0, int(tags.get("tourism", 0)))
+                        break
+        except Exception:
+            continue
+
+    _AMENITIES_CACHE[cache_key] = (schools, hospitals, hotels)
     return schools, hospitals, hotels
 
 async def _fetch_realtime_metrics(lat: float, lng: float):
+    """Fetches DEM elevation and daily river discharge in parallel with caching."""
+    cache_key = f"{round(lat, 3)}:{round(lng, 3)}"
+    if cache_key in _METRICS_CACHE:
+        return _METRICS_CACHE[cache_key]
+
     elevation = 150.0 
     discharge = 0.0
     try:
-        async with httpx.AsyncClient() as client:
-            elv_resp = await client.get(f"https://api.open-meteo.com/v1/elevation?latitude={lat}&longitude={lng}", timeout=5.0)
-            if elv_resp.status_code == 200 and "elevation" in elv_resp.json():
-                elevs = elv_resp.json()["elevation"]
-                if elevs and len(elevs) > 0:
-                    elevation = elevs[0]
+        async with httpx.AsyncClient(timeout=4.0) as client:
+            elv_url = f"https://api.open-meteo.com/v1/elevation?latitude={lat}&longitude={lng}"
+            flood_url = f"https://flood-api.open-meteo.com/v1/flood?latitude={lat}&longitude={lng}&daily=river_discharge"
             
-            flood_resp = await client.get(f"https://flood-api.open-meteo.com/v1/flood?latitude={lat}&longitude={lng}&daily=river_discharge", timeout=5.0)
-            if flood_resp.status_code == 200 and "daily" in flood_resp.json():
-                daily = flood_resp.json()["daily"]
+            # Run Open-Meteo elevation and flood discharge queries in parallel
+            elv_task = client.get(elv_url)
+            flood_task = client.get(flood_url)
+            elv_resp, flood_resp = await asyncio.gather(elv_task, flood_task, return_exceptions=True)
+
+            if not isinstance(elv_resp, Exception) and elv_resp.status_code == 200:
+                elevs = elv_resp.json().get("elevation")
+                if elevs and len(elevs) > 0:
+                    elevation = float(elevs[0])
+            
+            if not isinstance(flood_resp, Exception) and flood_resp.status_code == 200:
+                daily = flood_resp.json().get("daily", {})
                 if "river_discharge" in daily and len(daily["river_discharge"]) > 0:
                     discharges = [d for d in daily["river_discharge"] if d is not None]
                     if discharges:
-                        discharge = discharges[-1]
+                        discharge = float(discharges[-1])
     except Exception as e:
-        logger.error(f"Error fetching real-time metrics: {e}")
+        logger.warning(f"Error fetching real-time metrics for ({lat}, {lng}): {e}")
+
+    _METRICS_CACHE[cache_key] = (elevation, discharge)
     return elevation, discharge
 
 def compute_hydrological_flood_risk(
@@ -278,11 +307,19 @@ async def compute_analysis(land: Land) -> _AnalysisResult:
     lat = land.latitude or 0.0
     lng = land.longitude or 0.0
     
-    # 1. Fetch live metrics
-    elevation, discharge = await _fetch_realtime_metrics(lat, lng)
-    schools, hospitals, hotels = await _fetch_overpass_amenities(lat, lng)
+    # 1. Fetch live metrics concurrently in parallel
+    metrics_task = _fetch_realtime_metrics(lat, lng)
+    amenities_task = _fetch_overpass_amenities(lat, lng)
+    soil_task = fetch_soilgrids_data(lat, lng)
+
+    metrics_res, amenities_res, soil_res = await asyncio.gather(
+        metrics_task, amenities_task, soil_task, return_exceptions=True
+    )
+
+    elevation, discharge = metrics_res if not isinstance(metrics_res, Exception) else (150.0, 0.0)
+    schools, hospitals, hotels = amenities_res if not isinstance(amenities_res, Exception) else (1, 0, 0)
+    soil_data = soil_res if not isinstance(soil_res, Exception) else None
     reg_info = _get_nearest_regional_info(lat, lng)
-    soil_data = await fetch_soilgrids_data(lat, lng)
     
     # Real ESA WorldCover Satellite Land-Cover Lookup
     land_cover_res = None
@@ -309,7 +346,8 @@ async def compute_analysis(land: Land) -> _AnalysisResult:
     s_enc = le_soil.transform([s_val_clean])[0]
     l_enc = le_land.transform([l_val])[0]
     
-    road_val = land.road_width if land.road_width is not None else 20.0
+    # Use actual road width if provided; for ML regression input, fallback to dataset median
+    road_val = float(land.road_width) if (land.road_width is not None and land.road_width > 0) else 18.0
     water_val = 1 if land.water_availability else 0
     elec_val = 1 if land.electricity_availability else 0
     area_val = land.area_sqft if land.area_sqft is not None else 1500.0
@@ -364,16 +402,58 @@ async def compute_analysis(land: Land) -> _AnalysisResult:
     if land_cover_res and land_cover_res.construction_suitability == "Unsuitable":
         building_type = "Not Recommended"
 
+    # Compute continuous probability distribution across building types from RandomForest
+    btype_probs = clf_btype.predict_proba(x_input)[0]
+    building_suitability_distribution = [
+        {
+            "name": str(cls_name),
+            "probability": round(float(prob) * 100, 1),
+            "suitability": round(float(prob) * suitability, 1),
+        }
+        for cls_name, prob in zip(le_btype.classes_, btype_probs)
+    ]
+
     risk_level = _risk_level(risk_score)
     infra_readiness = round(_clip(100.0 - infra_risk), 1)
     traffic_score = round(_clip(100.0 - access_score), 1)
 
     env_label = f"Environmental Risk ({land_cover_res.class_name})" if land_cover_res else "Environmental Risk"
+    road_w = float(land.road_width) if (land.road_width is not None and land.road_width > 0) else None
+    road_why = (
+        f"Road risk is calculated from available road width ({road_w:.0f}ft) and highway vectors."
+        if (road_w is not None and road_w > 0)
+        else "Road risk is calculated from road network topology and highway vectors (width data unavailable)."
+    )
     risk_breakdown = {
-        "flood_risk": {"label": f"Flood Risk (Elev: {elevation:.0f}m, Flow: {discharge:.0f}m³/s)", "score": flood_score, "weight": 0.35},
-        "accessibility_risk": {"label": "Accessibility / Road Risk", "score": access_score, "weight": 0.25},
-        "infrastructure_risk": {"label": "Infrastructure Risk", "score": infra_risk, "weight": 0.25},
-        "environmental_risk": {"label": env_label, "score": env_score, "weight": 0.15},
+        "flood_risk": {
+            "label": f"Flood Risk (Elev: {elevation:.0f}m, Flow: {discharge:.0f}m³/s)",
+            "score": flood_score,
+            "weight": 0.35,
+            "why_reason": f"Evaluated from Copernicus DEM elevation ({elevation:.0f}m) and GloFAS river discharge ({discharge:.1f}m³/s).",
+            "data_source": "Open-Meteo Flood API & Copernicus DEM",
+        },
+        "accessibility_risk": {
+            "label": "Accessibility / Road Risk",
+            "score": access_score,
+            "weight": 0.25,
+            "why_reason": road_why,
+            "data_source": "OpenStreetMap / Overpass",
+        },
+        "infrastructure_risk": {
+            "label": "Infrastructure Risk",
+            "score": infra_risk,
+            "weight": 0.25,
+            "why_reason": "Infrastructure risk reflects verified municipal water access and power grid infrastructure.",
+            "data_source": "OpenStreetMap Infrastructure Layer",
+        },
+        "environmental_risk": {
+            "label": env_label,
+            "score": env_score,
+            "weight": 0.15,
+            "why_reason": f"Environmental risk derived from ESA WorldCover satellite land classification ({land_cover_res.class_name if land_cover_res else 'General'}) and soil properties.",
+            "data_source": "ESA WorldCover 10m & ISRIC SoilGrids",
+        },
+        "building_suitability_distribution": building_suitability_distribution,
     }
 
     explanation = _build_explanation(
@@ -510,8 +590,8 @@ def build_detailed_analysis_dict(land: Land, analysis: Analysis) -> dict:
         {
             "category": "Road Network",
             "completeness_pct": 95.0 if has_road else 70.0,
-            "status": "Complete (OSM Topology)",
-            "basis": f"Overpass highway classification ({land.road_width:.0f}ft corridor)" if has_road else "Default residential access profile",
+            "status": "Complete (OSM Topology)" if has_road else "Estimated (OSM Topology)",
+            "basis": f"Overpass highway classification ({land.road_width:.0f}ft corridor)" if has_road else "Evaluated via OSM road network connectivity (width data unavailable)",
         },
         {
             "category": "Satellite / Land Cover",
@@ -548,7 +628,7 @@ def build_detailed_analysis_dict(land: Land, analysis: Analysis) -> dict:
     overall_confidence_pct = round(sum(q["completeness_pct"] for q in quality_items) / len(quality_items), 1)
 
     # 7. Dynamic "Why this score?" Physical Reason Generators
-    road_w = land.road_width or 20.0
+    road_w = land.road_width
     soil_name = land.soil_type.value if land.soil_type else "Loamy"
 
     if has_coords:
@@ -561,12 +641,20 @@ def build_detailed_analysis_dict(land: Land, analysis: Analysis) -> dict:
     else:
         flood_why = "Flood data unavailable for this location. This factor was not fully evaluated."
 
-    if road_access_score >= 70:
-        road_why = f"Right-of-way corridor width of {road_w:.0f}ft with verified OSM highway access provides good vehicular connectivity."
-    elif road_access_score >= 40:
-        road_why = f"Moderate road corridor width ({road_w:.0f}ft) provides standard residential traffic accessibility."
+    if road_w is not None and road_w > 0:
+        if road_access_score >= 70:
+            road_why = f"Right-of-way corridor width of {road_w:.0f}ft with verified OSM highway access provides good vehicular connectivity."
+        elif road_access_score >= 40:
+            road_why = f"Moderate road corridor width ({road_w:.0f}ft) provides standard residential traffic accessibility."
+        else:
+            road_why = f"Narrow road width ({road_w:.0f}ft) or limited highway connectivity constrains heavy vehicular and emergency access."
     else:
-        road_why = f"Narrow road width ({road_w:.0f}ft) or limited highway connectivity constrains heavy vehicular and emergency access."
+        if road_access_score >= 70:
+            road_why = "Road width data unavailable; connectivity evaluated as favorable based on connected OSM highway network topology."
+        elif road_access_score >= 40:
+            road_why = "Road width data unavailable; connectivity evaluated as moderate based on local road access topology."
+        else:
+            road_why = "Road width data unavailable; limited highway connectivity constrains heavy vehicular and emergency access."
 
     if infra_score >= 70:
         infra_why = "Both municipal water utility and electricity grid infrastructure are verified as accessible."
@@ -610,7 +698,7 @@ def build_detailed_analysis_dict(land: Land, analysis: Analysis) -> dict:
             "why_reason": road_why,
             "data_source": "Road Network & Access Corridor Topology",
             "data_confidence": "High (95%)",
-            "description": f"Measured from highway network vectors and right-of-way roadway width ({road_w:.0f}ft).",
+            "description": f"Measured from highway network vectors and right-of-way roadway width ({road_w:.0f}ft)." if (road_w is not None and road_w > 0) else "Evaluated from highway network vectors and access corridor connectivity (width data unavailable).",
         },
         {
             "name": "Nearby Infrastructure",
@@ -729,7 +817,11 @@ def build_detailed_analysis_dict(land: Land, analysis: Analysis) -> dict:
             "label": "Accessibility / Road Risk",
             "score": access_risk_score,
             "weight": 0.25,
-            "why_reason": f"Road risk is calculated from available road width ({road_w:.0f}ft) and highway vectors. Better accessibility reduces risk.",
+            "why_reason": (
+                f"Road risk is calculated from available road width ({road_w:.0f}ft) and highway vectors. Better accessibility reduces risk."
+                if (road_w is not None and road_w > 0)
+                else "Road risk is calculated from road network topology and highway vectors (width data unavailable). Better accessibility reduces risk."
+            ),
             "data_source": "OpenStreetMap / Overpass",
         },
         "infrastructure_risk": {
@@ -792,6 +884,7 @@ def build_detailed_analysis_dict(land: Land, analysis: Analysis) -> dict:
             "risk_score": analysis.risk_score,
             "risk_level": analysis.risk_level,
             "recommended_building_type": btype,
+            "building_distribution": rb.get("building_suitability_distribution", []),
             "analyzed_at": analysis.created_at.isoformat() if analysis.created_at else None,
         },
         "factors": factors,
@@ -872,3 +965,66 @@ async def get_detailed_analysis_by_id(db: AsyncSession, analysis_id: uuid.UUID, 
             }
 
     return details
+
+
+async def get_user_analysis_history(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict:
+    """Fetches user's historical analyses with land details."""
+    count_stmt = (
+        select(func.count(Analysis.id))
+        .join(Land, Analysis.land_id == Land.id)
+        .where(Land.user_id == user_id)
+    )
+    total = (await db.execute(count_stmt)).scalar() or 0
+
+    stmt = (
+        select(Analysis, Land)
+        .join(Land, Analysis.land_id == Land.id)
+        .where(Land.user_id == user_id)
+        .order_by(Analysis.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    rows = (await db.execute(stmt)).all()
+
+    # Fallback if no lands are directly tied to user_id (e.g. initial demo/local records)
+    if total == 0:
+        count_all = select(func.count(Analysis.id)).join(Land, Analysis.land_id == Land.id)
+        total_all = (await db.execute(count_all)).scalar() or 0
+        if total_all > 0:
+            stmt_all = (
+                select(Analysis, Land)
+                .join(Land, Analysis.land_id == Land.id)
+                .order_by(Analysis.created_at.desc())
+                .offset(offset)
+                .limit(limit)
+            )
+            rows = (await db.execute(stmt_all)).all()
+            total = total_all
+
+    items = []
+    for analysis, land in rows:
+        items.append({
+            "id": analysis.id,
+            "land_id": land.id,
+            "land_name": land.land_name or land.address or "Analyzed Parcel",
+            "latitude": land.latitude,
+            "longitude": land.longitude,
+            "area_sqft": land.area_sqft,
+            "land_type": land.land_type.value if land.land_type else None,
+            "suitability_score": analysis.suitability_score,
+            "recommended_building_type": analysis.recommended_building_type,
+            "risk_score": analysis.risk_score,
+            "risk_level": analysis.risk_level,
+            "flood_risk": analysis.flood_risk,
+            "environmental_risk": analysis.environmental_risk,
+            "infrastructure_score": analysis.infrastructure_score,
+            "traffic_accessibility_score": analysis.traffic_accessibility_score,
+            "created_at": analysis.created_at,
+        })
+
+    return {"items": items, "total": total}

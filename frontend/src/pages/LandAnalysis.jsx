@@ -1,5 +1,18 @@
 import React, { useEffect, useState, useMemo } from 'react'
-import { NavLink } from 'react-router-dom'
+import { NavLink, useNavigate } from 'react-router-dom'
+import {
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  Tooltip as RechartsTooltip,
+  Legend,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+} from 'recharts'
 import MapPicker from '../components/MapPicker'
 import LocationSearch from '../components/LocationSearch'
 import ScoreGauge from '../components/ScoreGauge'
@@ -12,6 +25,7 @@ import DetailedLandAnalysisModal from '../components/DetailedLandAnalysisModal'
 import useGeolocation from '../hooks/useGeolocation'
 import landService from '../services/landService'
 import analysisService from '../services/analysisService'
+import reportService from '../services/reportService'
 import geocodeService from '../services/geocodeService'
 import gisService, { normalizeSoilType, calculatePolygonAreaSqFt } from '../services/gisService'
 import { pingBackend } from '../services/api'
@@ -62,7 +76,9 @@ class House3DErrorBoundary extends React.Component {
 }
 
 export default function LandAnalysis() {
+  const navigate = useNavigate()
   const { position: defaultCenter } = useGeolocation()
+  const [downloadingFormat, setDownloadingFormat] = useState(null)
 
   const [searchTarget, setSearchTarget] = useState(null)
   
@@ -76,7 +92,10 @@ export default function LandAnalysis() {
     }
   }, []);
 
-  const [selectedBuildingType, setSelectedBuildingType] = useState(savedState?.selectedBuildingType || 'Individual House')
+  const storedBType = sessionStorage.getItem('selected_building_type') || localStorage.getItem('selected_building_type')
+  const [selectedBuildingType, setSelectedBuildingType] = useState(
+    storedBType || savedState?.selectedBuildingType || 'Individual House'
+  )
   const [clickedLocation, setClickedLocation] = useState(savedState?.clickedLocation || null)
   const [activeBoundary, setActiveBoundary] = useState(savedState?.activeBoundary || null)
   
@@ -86,7 +105,11 @@ export default function LandAnalysis() {
   const [directAreaUnit, setDirectAreaUnit] = useState(savedState?.directAreaUnit || 'sq.ft')
 
   // Workflow Steps: type -> select -> fetching -> summary -> result
-  const [step, setStep] = useState(savedState?.step || 'type') 
+  const initialStep = savedState?.step && savedState.step !== 'type'
+    ? savedState.step
+    : (storedBType ? 'select' : 'type')
+
+  const [step, setStep] = useState(initialStep) 
   
   const [gisData, setGisData] = useState(savedState?.gisData || {
     address: null,
@@ -112,6 +135,74 @@ export default function LandAnalysis() {
   useEffect(() => {
     pingBackend()
   }, [])
+
+  const handleDownloadPdf = async (analysisId, locationLabel) => {
+    if (!analysisId) return
+    setDownloadingFormat('pdf')
+    try {
+      const safeName = (locationLabel || 'land').toLowerCase().replace(/[^a-z0-9]/g, '-')
+      await reportService.exportPdf(analysisId, `${safeName}-analysis-report.pdf`)
+    } catch (err) {
+      alert('Could not download PDF report: ' + (err.message || 'Server error'))
+    } finally {
+      setDownloadingFormat(null)
+    }
+  }
+
+  const handleDownloadExcel = async (analysisId, locationLabel) => {
+    if (!analysisId) return
+    setDownloadingFormat('excel')
+    try {
+      const safeName = (locationLabel || 'land').toLowerCase().replace(/[^a-z0-9]/g, '-')
+      await reportService.exportExcel(analysisId, `${safeName}-analysis-report.xlsx`)
+    } catch (err) {
+      alert('Could not download Excel workbook: ' + (err.message || 'Server error'))
+    } finally {
+      setDownloadingFormat(null)
+    }
+  }
+
+  const buildingSuitabilityData = useMemo(() => {
+    if (!result) return []
+    const dist = result.risk_breakdown?.building_suitability_distribution
+    if (Array.isArray(dist) && dist.length > 0) {
+      return dist.map((d) => ({
+        name: d.name,
+        value: Number(d.probability ?? d.suitability ?? d.value ?? 20),
+      }))
+    }
+    const currentSuit = Number(result.suitability_score) || 75
+    const areaSqFt = Number(gisData?.area_sqft) || 2400
+    const types = [
+      { name: 'House', weight: 1.0 },
+      { name: 'Apartment', weight: areaSqFt >= 2000 ? 0.95 : 0.4 },
+      { name: 'Commercial', weight: areaSqFt >= 1500 ? 0.9 : 0.5 },
+      { name: 'School', weight: areaSqFt >= 5000 ? 0.85 : 0.3 },
+      { name: 'Hospital', weight: areaSqFt >= 10000 ? 0.85 : 0.2 },
+    ]
+    const totalRaw = types.reduce((acc, t) => acc + currentSuit * t.weight, 0)
+    return types.map((t) => ({
+      name: t.name,
+      value: Math.round(((currentSuit * t.weight) / totalRaw) * 100),
+    }))
+  }, [result, gisData])
+
+  const riskComparisonData = useMemo(() => {
+    if (!result) return []
+    const rb = result.risk_breakdown || {}
+    const getScore = (k, fb) => {
+      const val = rb[k]
+      if (typeof val === 'number') return val
+      if (val && typeof val.score === 'number') return val.score
+      return fb
+    }
+    return [
+      { name: 'Flood Risk', score: Math.round(getScore('flood_risk', 15)) },
+      { name: 'Road Access', score: Math.round(getScore('accessibility_risk', 20)) },
+      { name: 'Infrastructure', score: Math.round(getScore('infrastructure_risk', 25)) },
+      { name: 'Environmental', score: Math.round(getScore('environmental_risk', 15)) },
+    ]
+  }, [result])
 
   // Fallback for missing area in summary
   const [manualArea, setManualArea] = useState(savedState?.manualArea || '')
@@ -232,8 +323,8 @@ export default function LandAnalysis() {
       // Run concurrent GIS queries
       const [address, infra, soil, landCover] = await Promise.all([
         geocodeService.reverseGeocode(lat, lng).catch(() => 'Data Not Available'),
-        gisService.fetchInfrastructure(lat, lng),
-        gisService.fetchSoilType(lat, lng),
+        gisService.fetchInfrastructure(lat, lng).catch(() => ({ available: false })),
+        gisService.fetchSoilType(lat, lng).catch(() => ({ available: false })),
         gisService.fetchLandCover(lat, lng).catch(() => ({ available: false }))
       ]);
 
@@ -282,7 +373,8 @@ export default function LandAnalysis() {
         area_source: areaSource,
         boundary_geojson: boundaryGeoJson,
         is_estimated: areaInputMode === 'direct',
-        road_width: infra.available ? infra.roadWidth : 20,
+        road_width: infra.available && infra.roadWidth ? infra.roadWidth : null,
+        is_road_width_estimated: infra.isRoadWidthEstimated || false,
         water_availability: infra.available ? infra.water : true,
         electricity_availability: infra.available ? infra.electricity : true,
         soil_type: soil.available ? normalizeSoilType(soil.mappedType) : 'Red Soil',
@@ -332,7 +424,7 @@ export default function LandAnalysis() {
         input_unit: inputUnit,
         area_source: areaSource,
         area_sqft: finalSqFt,
-        road_width: gisData.road_width || 20,
+        road_width: gisData.road_width || null,
         soil_type: normalizeSoilType(gisData.soil_type),
         land_type: "Residential",
         water_availability: gisData.water_availability !== null ? gisData.water_availability : true,
@@ -494,7 +586,15 @@ export default function LandAnalysis() {
             {/* Search and Top Bar */}
             <div className="mb-3 flex flex-wrap gap-2 justify-between items-center">
               <div className="flex-1 min-w-[240px] mr-2">
-                <LocationSearch onSelect={setSearchTarget} />
+                <LocationSearch
+                  onSelect={(loc) => {
+                    setSearchTarget(loc)
+                    if (loc?.lat && loc?.lng) {
+                      setClickedLocation({ lat: loc.lat, lng: loc.lng })
+                      setError(null)
+                    }
+                  }}
+                />
               </div>
               <div className="text-xs font-semibold text-blue-700 bg-blue-100 px-3 py-1.5 rounded-full whitespace-nowrap">
                 Type: {selectedBuildingType}
@@ -766,7 +866,11 @@ export default function LandAnalysis() {
                 <div>
                   <p className="text-sm font-bold text-slate-700">Road Access Width</p>
                 </div>
-                <span className="text-sm text-slate-600 font-medium">{gisData.road_width ? `${gisData.road_width} ft` : '20 ft'}</span>
+                <span className="text-sm text-slate-600 font-medium">
+                  {gisData.road_width
+                    ? `${gisData.road_width} ft${gisData.is_road_width_estimated ? ' (Estimated)' : ''}`
+                    : 'Width data unavailable (evaluated via OSM topology)'}
+                </span>
               </div>
 
               <div className="flex justify-between items-center py-3 border-b border-slate-100">
@@ -917,68 +1021,173 @@ export default function LandAnalysis() {
           {!submitting && result && (
             <div className="space-y-6">
               
-              {/* Suitability Dashboard */}
-              <div className="grid sm:grid-cols-2 gap-5">
-                <div 
-                  onClick={() => setShowDetailedModal(true)}
-                  className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex flex-col items-center text-center cursor-pointer hover:border-blue-500 hover:shadow-md transition-all group relative"
-                  title="Click to view detailed factor breakdown and transparent scores"
-                >
-                  <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
-                      Click to Inspect 🔍
-                    </span>
+              {/* Executive Summary Card & Direct Action Bar */}
+              <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 pb-6 border-b border-slate-100">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold uppercase tracking-wider text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200">
+                        Target: {selectedBuildingType}
+                      </span>
+                      {result.recommended_building_type && result.recommended_building_type !== selectedBuildingType && (
+                        <span className="text-xs font-bold text-amber-800 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-200">
+                          AI Recommendation: {result.recommended_building_type}
+                        </span>
+                      )}
+                    </div>
+                    <h2 className="text-xl sm:text-2xl font-black text-slate-900 mt-1">
+                      {gisData?.address ? gisData.address.split(',')[0].trim() : 'Analyzed Parcel'}
+                    </h2>
+                    <p className="text-xs text-slate-500">
+                      Area: <strong>{Number(gisData?.area_sqft || manualArea || 0).toLocaleString()} sq.ft</strong> · 
+                      Road: <strong>{gisData?.road_width ? `${gisData.road_width} ft` : 'Corridor Evaluated (Width unavailable)'}</strong> · 
+                      Soil: <strong>{gisData?.soil_type || 'Regional Taxonomy'}</strong>
+                    </p>
                   </div>
 
-                  <ScoreGauge score={result.suitability_score ?? 0} />
-                  <p className="text-xs text-slate-500 mt-3 font-semibold">ML Suitability Score</p>
-                  <span className="text-[11px] font-bold text-blue-600 group-hover:underline mt-0.5 inline-flex items-center gap-1">
-                    Click for detailed factor breakdown →
-                  </span>
-                  
-                  <div className="mt-5 pt-5 border-t border-slate-100 w-full">
-                    <p className="text-xs text-slate-500">Selected building type</p>
-                    <p className="font-black text-slate-800 text-lg mt-1">
-                      {selectedBuildingType}
-                    </p>
-                    {result.recommended_building_type && result.recommended_building_type !== selectedBuildingType && (
-                      <div className="mt-2 text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 py-1 px-3 rounded-full">
-                        AI Recommended: {result.recommended_building_type}
-                      </div>
-                    )}
+                  {/* Summary Metric Pills */}
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="bg-emerald-50 border border-emerald-200 px-4 py-2.5 rounded-xl text-center min-w-[120px]">
+                      <span className="text-[10px] uppercase font-bold text-emerald-700 tracking-wider block">Suitability Score</span>
+                      <span className="text-2xl font-black text-emerald-800">
+                        {Math.round(result.suitability_score ?? 0)}%
+                      </span>
+                    </div>
+
+                    <div className="bg-slate-50 border border-slate-200 px-4 py-2.5 rounded-xl text-center min-w-[120px]">
+                      <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider block">Composite Risk</span>
+                      <span className="text-2xl font-black text-slate-800">
+                        {Math.round(result.risk_score ?? 0)}%
+                      </span>
+                      <span className="text-[10px] font-bold text-slate-600 block">
+                        {result.risk_level ?? 'Low'} Risk
+                      </span>
+                    </div>
                   </div>
                 </div>
 
-                <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex flex-col items-center text-center">
-                  <RiskGauge score={result.risk_score ?? 0} />
-                  <p className="text-xs text-slate-500 mt-3">
-                    Aggregated Risk Score{' '}
-                    <span className="text-slate-400">(higher = riskier)</span>
-                  </p>
-                  <p className="text-[10px] text-slate-400 mt-1">Calculated from Real Environmental & Hydrology Data</p>
+                {/* Primary Action Buttons Bar */}
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-5">
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setShowDetailedModal(true)}
+                      className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs transition-colors shadow-sm flex items-center gap-2"
+                    >
+                      <span>📊 Breakdown</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadPdf(result.id, gisData.address)}
+                      disabled={downloadingFormat === 'pdf'}
+                      className="px-4 py-2.5 rounded-xl bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 font-semibold text-xs transition-colors shadow-2xs flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                      <span>📄 {downloadingFormat === 'pdf' ? 'Generating PDF…' : 'Download PDF Report'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadExcel(result.id, gisData.address)}
+                      disabled={downloadingFormat === 'excel'}
+                      className="px-4 py-2.5 rounded-xl bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 font-semibold text-xs transition-colors shadow-2xs flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                      <span>📈 {downloadingFormat === 'excel' ? 'Exporting…' : 'Download Excel'}</span>
+                    </button>
+                  </div>
 
-                  <div className="mt-5 pt-5 border-t border-slate-100 w-full">
-                    <p className="text-xs text-slate-500">Risk level</p>
-                    <p className="font-black text-slate-800 text-lg mt-1">
-                      {result.risk_level ?? 'Low'}
-                    </p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={resetFlow}
+                      className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50 text-xs font-semibold transition-colors"
+                    >
+                      🔄 Analyze New Land
+                    </button>
                   </div>
                 </div>
               </div>
 
-              {/* Risk Breakdown Details */}
-              <div className="grid lg:grid-cols-2 gap-5">
-                <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
-                  <h4 className="font-bold text-slate-800 text-sm mb-1">Risk breakdown</h4>
-                  <RiskBreakdownList breakdown={result.risk_breakdown} />
-                  <p className="text-[10px] text-slate-400 mt-3 border-t border-slate-100 pt-2">
-                    * Flood risk is calculated using live terrain elevation & river discharge hydrology.
-                  </p>
+              {/* TWO STRICT CHARTS: Pie Chart (Suitability) & Bar Chart (Risks) */}
+              <div className="grid lg:grid-cols-2 gap-6">
+                {/* 1. ONE PIE CHART: Building Suitability Comparison */}
+                <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm flex flex-col">
+                  <div className="mb-4">
+                    <h3 className="font-extrabold text-slate-900 text-base">
+                      Building Suitability Comparison
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Relative suitability distribution across key structural categories
+                    </p>
+                  </div>
+
+                  <div className="h-[280px] w-full flex items-center justify-center">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={buildingSuitabilityData}
+                          dataKey="value"
+                          nameKey="name"
+                          cx="50%"
+                          cy="50%"
+                          outerRadius={95}
+                          innerRadius={50}
+                          paddingAngle={3}
+                          label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                          labelLine={false}
+                        >
+                          {buildingSuitabilityData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={['#2563EB', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899'][index % 5]} />
+                          ))}
+                        </Pie>
+                        <RechartsTooltip formatter={(value, name) => [`${value}% Suitability`, name]} />
+                        <Legend verticalAlign="bottom" height={36} iconType="circle" />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                {/* 2. ONE BAR CHART: Risk Assessment Values Comparison */}
+                <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm flex flex-col">
+                  <div className="mb-4">
+                    <h3 className="font-extrabold text-slate-900 text-base">
+                      Risk Assessment Values Comparison
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Quantitative evaluation across flood, access, infrastructure, and environmental factors
+                    </p>
+                  </div>
+
+                  <div className="h-[280px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={riskComparisonData} margin={{ top: 20, right: 20, left: -10, bottom: 20 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
+                        <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#64748B' }} interval={0} angle={-10} textAnchor="end" />
+                        <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: '#64748B' }} unit="%" />
+                        <RechartsTooltip formatter={(val) => [`${val}% Risk`, 'Index']} />
+                        <Bar dataKey="score" radius={[6, 6, 0, 0]} maxBarSize={48}>
+                          {riskComparisonData.map((entry, index) => {
+                            const color = entry.score <= 30 ? '#10B981' : (entry.score <= 60 ? '#F59E0B' : '#EF4444')
+                            return <Cell key={`bar-${index}`} fill={color} />
+                          })}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              </div>
+
+              {/* Risk Breakdown Details & AI Suitability Explanation */}
+              <div className="grid lg:grid-cols-2 gap-6">
+                <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <h4 className="font-bold text-slate-900 text-sm">Explainable Risk Factors</h4>
+                    <span className="text-[11px] text-slate-400">Click "Why this risk?" for details</span>
+                  </div>
+                  <RiskBreakdownList breakdown={result.risk_breakdown} landData={gisData} />
                 </div>
                 
-                <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 flex flex-col">
-                  <h4 className="font-bold text-slate-800 text-sm mb-3">AI Suitability Explanation</h4>
-                  <div className="bg-blue-50 text-blue-900 p-4 rounded-lg text-sm flex-1 leading-relaxed border border-blue-100">
+                <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 flex flex-col">
+                  <h4 className="font-bold text-slate-900 text-sm mb-3">AI Suitability Synthesis</h4>
+                  <div className="bg-blue-50/70 text-blue-950 p-4 rounded-xl text-xs sm:text-sm flex-1 leading-relaxed border border-blue-200/80">
                     {result.ai_explanation || "Feasibility assessment completed successfully based on GIS and satellite spatial parameters."}
                   </div>
                 </div>
@@ -1047,7 +1256,7 @@ export default function LandAnalysis() {
                           selected_building_type: selectedBuildingType,
                           area_sqft: Number(gisData?.area_sqft) || (manualArea ? parseFloat(manualArea) : 2400),
                           area_source: (gisData?.area_source || (areaInputMode === 'direct' ? 'direct_input' : 'polygon')) === 'direct_input' ? 'direct_input' : 'polygon',
-                          road_width_ft: gisData?.road_width || gisData?.road_width_ft || 20,
+                          road_width_ft: gisData?.road_width || gisData?.road_width_ft || null,
                           soil_type: gisData?.soil_type || 'Red Soil',
                           land_type: gisData?.land_type || 'Residential',
                           latitude: gisData?.lat ?? clickedLocation?.lat,

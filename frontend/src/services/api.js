@@ -11,20 +11,17 @@ export const getApiBaseUrl = () => {
   const host = isBrowser ? window.location.hostname : ''
   const isLocal = host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '::1' || host === ''
 
+  // 1. Local environment always targets local backend
+  if (isLocal) {
+    return 'http://127.0.0.1:8000/api/v1'
+  }
+
   const envUrl = import.meta.env.VITE_API_BASE_URL
   const cleanEnvUrl = (envUrl && typeof envUrl === 'string') ? envUrl.trim().replace(/\/+$/, '') : ''
 
-  // 1. Explicit env URL takes precedence (if valid for the current environment)
-  if (cleanEnvUrl) {
-    if (!isLocal && (cleanEnvUrl.includes('localhost') || cleanEnvUrl.includes('127.0.0.1'))) {
-      return 'https://smart-land-analysis.onrender.com/api/v1'
-    }
+  // 2. Explicit production env URL takes precedence
+  if (cleanEnvUrl && !cleanEnvUrl.includes('localhost') && !cleanEnvUrl.includes('127.0.0.1')) {
     return cleanEnvUrl
-  }
-
-  // 2. Local development default
-  if (isLocal) {
-    return 'http://127.0.0.1:8000/api/v1'
   }
 
   // 3. Production default Render backend URL
@@ -192,11 +189,16 @@ export const pingBackend = async () => {
  */
 export const checkBackendHealth = async () => {
   const primaryUrl = getHealthCheckUrl()
+  const host = typeof window !== 'undefined' && window.location ? window.location.hostname : ''
+  const isLocal = host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '::1' || host === ''
+
   const candidates = [
     primaryUrl,
     getApiBaseUrl() + '/health',
-    'https://smart-land-analysis.onrender.com/health',
-    'https://smart-land-analysis.onrender.com/api/v1/health',
+    ...(isLocal ? [] : [
+      'https://smart-land-analysis.onrender.com/health',
+      'https://smart-land-analysis.onrender.com/api/v1/health'
+    ])
   ]
 
   const uniqueUrls = [...new Set(candidates.filter(Boolean))]

@@ -67,9 +67,9 @@ def generate_land_report_excel(land: Land, analysis: Analysis, details: dict) ->
     if rw is None and land:
         rw = getattr(land, "road_width_ft", None)
     try:
-        rw_str = f"{float(rw):.0f} ft" if rw is not None else "20 ft"
+        rw_str = f"{float(rw):.0f} ft" if (rw is not None and float(rw) > 0) else "Width data unavailable"
     except (ValueError, TypeError):
-        rw_str = "20 ft"
+        rw_str = "Width data unavailable"
 
     soil_raw = getattr(land, "soil_type", None) if land else None
     soil_val = getattr(soil_raw, "value", str(soil_raw)) if soil_raw else "Loamy"
