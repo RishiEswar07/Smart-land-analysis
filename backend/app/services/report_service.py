@@ -29,20 +29,17 @@ def _reports_dir() -> str:
 async def generate_report(db: AsyncSession, analysis_id: uuid.UUID, user_id: uuid.UUID) -> Report:
     """
     Generates a PDF for the given analysis, saves it to disk, and records a Report row.
+    Enforces user ownership check.
     """
     result = await db.execute(
         select(Analysis, Land)
         .join(Land, Analysis.land_id == Land.id)
-        .where(Analysis.id == analysis_id, Land.user_id == user_id)
+        .where(
+            Analysis.id == analysis_id,
+            (Land.user_id == user_id) | (Land.user_id.is_(None))
+        )
     )
     row = result.first()
-    if row is None:
-        result_fallback = await db.execute(
-            select(Analysis, Land)
-            .join(Land, Analysis.land_id == Land.id)
-            .where(Analysis.id == analysis_id)
-        )
-        row = result_fallback.first()
     if row is None:
         raise NotFoundError(entity="Analysis", identifier=str(analysis_id))
     analysis, land = row
@@ -67,16 +64,12 @@ async def get_or_generate_pdf_bytes(db: AsyncSession, analysis_id: uuid.UUID, us
     result = await db.execute(
         select(Analysis, Land)
         .join(Land, Analysis.land_id == Land.id)
-        .where(Analysis.id == analysis_id, Land.user_id == user_id)
+        .where(
+            Analysis.id == analysis_id,
+            (Land.user_id == user_id) | (Land.user_id.is_(None))
+        )
     )
     row = result.first()
-    if row is None:
-        result_fallback = await db.execute(
-            select(Analysis, Land)
-            .join(Land, Analysis.land_id == Land.id)
-            .where(Analysis.id == analysis_id)
-        )
-        row = result_fallback.first()
     if row is None:
         raise NotFoundError(entity="Analysis", identifier=str(analysis_id))
     analysis, land = row
@@ -91,16 +84,12 @@ async def get_or_generate_excel_report(db: AsyncSession, analysis_id: uuid.UUID,
     result = await db.execute(
         select(Analysis, Land)
         .join(Land, Analysis.land_id == Land.id)
-        .where(Analysis.id == analysis_id, Land.user_id == user_id)
+        .where(
+            Analysis.id == analysis_id,
+            (Land.user_id == user_id) | (Land.user_id.is_(None))
+        )
     )
     row = result.first()
-    if row is None:
-        result_fallback = await db.execute(
-            select(Analysis, Land)
-            .join(Land, Analysis.land_id == Land.id)
-            .where(Analysis.id == analysis_id)
-        )
-        row = result_fallback.first()
     if row is None:
         raise NotFoundError(entity="Analysis", identifier=str(analysis_id))
     analysis, land = row
@@ -115,16 +104,12 @@ async def get_or_generate_json_report(db: AsyncSession, analysis_id: uuid.UUID, 
     result = await db.execute(
         select(Analysis, Land)
         .join(Land, Analysis.land_id == Land.id)
-        .where(Analysis.id == analysis_id, Land.user_id == user_id)
+        .where(
+            Analysis.id == analysis_id,
+            (Land.user_id == user_id) | (Land.user_id.is_(None))
+        )
     )
     row = result.first()
-    if row is None:
-        result_fallback = await db.execute(
-            select(Analysis, Land)
-            .join(Land, Analysis.land_id == Land.id)
-            .where(Analysis.id == analysis_id)
-        )
-        row = result_fallback.first()
     if row is None:
         raise NotFoundError(entity="Analysis", identifier=str(analysis_id))
     analysis, land = row
@@ -140,16 +125,12 @@ async def get_report_file(db: AsyncSession, report_id: uuid.UUID, user_id: uuid.
     result = await db.execute(
         select(Report, Land)
         .join(Land, Report.land_id == Land.id)
-        .where(Report.id == report_id, Land.user_id == user_id)
+        .where(
+            Report.id == report_id,
+            (Land.user_id == user_id) | (Land.user_id.is_(None))
+        )
     )
     row = result.first()
-    if row is None:
-        result_fallback = await db.execute(
-            select(Report, Land)
-            .join(Land, Report.land_id == Land.id)
-            .where(Report.id == report_id)
-        )
-        row = result_fallback.first()
     if row is None:
         raise NotFoundError(entity="Report", identifier=str(report_id))
     report, land = row

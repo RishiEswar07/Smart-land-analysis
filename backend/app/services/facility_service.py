@@ -210,10 +210,10 @@ async def _fetch_from_nominatim_fallback(
         "User-Agent": "SmartLandAnalysis/2.0 (Academic Geospatial Research; contact@smartland.edu)"
     }
     results: Dict[str, List[Dict[str, Any]]] = {k: [] for k in queries}
-    sem = asyncio.Semaphore(2)
+    sem = asyncio.Semaphore(4)
 
     tasks = []
-    async with httpx.AsyncClient(timeout=8.0) as client:
+    async with httpx.AsyncClient(timeout=6.0) as client:
         for cat_key, term_list in queries.items():
             vb = viewbox_transit if cat_key == "airports" else viewbox_local
             for term, cat_label in term_list:
@@ -245,7 +245,7 @@ async def _execute_fetch(
     bus_stop_m = int(min(local_m, 2500))
 
     query = f"""
-    [out:json][timeout:8];
+    [out:json][timeout:6];
     (
       nwr["amenity"~"bus_station|hospital|clinic|school|college|university"](around:{local_m},{lat},{lng});
       node["highway"="bus_stop"](around:{bus_stop_m},{lat},{lng});
@@ -267,10 +267,10 @@ async def _execute_fetch(
     source = "Geospatial Overpass Engine"
     overpass_succeeded = False
 
-    for endpoint in OVERPASS_ENDPOINTS:
+    for endpoint in OVERPASS_ENDPOINTS[:2]:
         try:
             logger.info(f"Connecting to Overpass endpoint: {endpoint}")
-            async with httpx.AsyncClient(timeout=3.0) as client:
+            async with httpx.AsyncClient(timeout=2.5) as client:
                 resp = await client.post(endpoint, data={"data": query}, headers=headers)
                 if resp.status_code == 200:
                     data = resp.json()

@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 SOILGRIDS_PROPERTIES_API = "https://rest.isric.org/soilgrids/v2.0/properties/query"
 DEFAULT_SOIL_TEXTURE = {"clay": 33.3, "sand": 33.3, "silt": 33.4, "soil_type": "Loamy", "source": "Fallback (Default)"}
+_SOIL_CACHE: Dict[str, Dict[str, Any]] = {}
 
 
 def classify_soil_type(clay: float, sand: float, silt: float) -> str:
@@ -32,18 +33,15 @@ def classify_soil_type(clay: float, sand: float, silt: float) -> str:
         return "Loamy"
 
 
-async def fetch_soilgrids_data(lat: float, lng: float, timeout_seconds: float = 6.0) -> Dict[str, Any]:
+async def fetch_soilgrids_data(lat: float, lng: float, timeout_seconds: float = 3.5) -> Dict[str, Any]:
     """
-    Fetches mean clay, sand, and silt concentrations (0-5cm depth) from ISRIC SoilGrids API v2.0.
-
-    Args:
-        lat (float): Latitude coordinate (-90 to 90)
-        lng (float): Longitude coordinate (-180 to 180)
-        timeout_seconds (float): HTTP timeout ceiling
-
-    Returns:
-        Dict[str, Any]: Dictionary containing clay, sand, silt percentages and classified soil_type.
+    Fetches mean clay, sand, and silt concentrations (0-5cm depth) from ISRIC SoilGrids API v2.0
+    with fast in-memory coordinate caching and bounded timeout protection.
     """
+    cache_key = f"{round(lat, 3)}:{round(lng, 3)}"
+    if cache_key in _SOIL_CACHE:
+        return _SOIL_CACHE[cache_key].copy()
+
     params = {
         "lon": lng,
         "lat": lat,
@@ -58,6 +56,7 @@ async def fetch_soilgrids_data(lat: float, lng: float, timeout_seconds: float = 
 
             if response.status_code != 200:
                 logger.warning(f"SoilGrids API returned non-200 status code: {response.status_code}")
+                _SOIL_CACHE[cache_key] = DEFAULT_SOIL_TEXTURE.copy()
                 return DEFAULT_SOIL_TEXTURE.copy()
 
             data = response.json()
@@ -84,15 +83,18 @@ async def fetch_soilgrids_data(lat: float, lng: float, timeout_seconds: float = 
                 si = texture_means["silt"]
                 soil_cat = classify_soil_type(c, s, si)
                 
-                return {
+                res_dict = {
                     "clay": c,
                     "sand": s,
                     "silt": si,
                     "soil_type": soil_cat,
                     "source": "ISRIC SoilGrids v2.0 REST API"
                 }
+                _SOIL_CACHE[cache_key] = res_dict
+                return res_dict
 
             logger.warning(f"SoilGrids API response missing layer details for ({lat}, {lng}). Using fallback.")
+            _SOIL_CACHE[cache_key] = DEFAULT_SOIL_TEXTURE.copy()
             return DEFAULT_SOIL_TEXTURE.copy()
 
     except httpx.TimeoutException:

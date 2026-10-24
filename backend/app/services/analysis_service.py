@@ -181,7 +181,7 @@ _AMENITIES_CACHE: dict[str, tuple[int, int, int]] = {}
 _METRICS_CACHE: dict[str, tuple[float, float]] = {}
 
 async def _fetch_overpass_amenities(lat: float, lng: float):
-    """Queries OpenStreetMap Overpass API for facilities within 2000m with fast mirror fallback and caching."""
+    """Queries OpenStreetMap Overpass API for facilities within 2000m with fast mirror fallback, strict timeout cap, and caching."""
     cache_key = f"{round(lat, 3)}:{round(lng, 3)}"
     if cache_key in _AMENITIES_CACHE:
         return _AMENITIES_CACHE[cache_key]
@@ -195,25 +195,33 @@ async def _fetch_overpass_amenities(lat: float, lng: float):
     );
     out count;
     """
+    headers = {"User-Agent": "SmartLandAnalysis/2.0 (Geospatial Research; mailto:admin@smartland.edu)"}
     endpoints = [
         "https://overpass-api.de/api/interpreter",
         "https://lz4.overpass-api.de/api/interpreter",
-        "https://overpass.kumi.systems/api/interpreter",
     ]
-    for ep in endpoints:
-        try:
-            async with httpx.AsyncClient(timeout=2.5) as client:
-                resp = await client.post(ep, data={"data": query})
-                if resp.status_code == 200:
-                    data = resp.json()
-                    if "elements" in data and len(data["elements"]) > 0:
-                        tags = data["elements"][0].get("tags", {})
-                        schools = max(0, int(tags.get("amenity", 0)) // 2)
-                        hospitals = max(0, int(tags.get("amenity", 0)) // 4)
-                        hotels = max(0, int(tags.get("tourism", 0)))
-                        break
-        except Exception:
-            continue
+
+    async def _query_mirrors():
+        nonlocal schools, hospitals, hotels
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            for ep in endpoints:
+                try:
+                    resp = await client.post(ep, data={"data": query}, headers=headers)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        if "elements" in data and len(data["elements"]) > 0:
+                            tags = data["elements"][0].get("tags", {})
+                            schools = max(0, int(tags.get("amenity", 0)) // 2)
+                            hospitals = max(0, int(tags.get("amenity", 0)) // 4)
+                            hotels = max(0, int(tags.get("tourism", 0)))
+                            return
+                except Exception:
+                    continue
+
+    try:
+        await asyncio.wait_for(_query_mirrors(), timeout=2.5)
+    except Exception:
+        pass
 
     _AMENITIES_CACHE[cache_key] = (schools, hospitals, hotels)
     return schools, hospitals, hotels
@@ -926,21 +934,16 @@ def build_detailed_analysis_dict(land: Land, analysis: Analysis) -> dict:
 
 
 async def get_detailed_analysis_by_id(db: AsyncSession, analysis_id: uuid.UUID, user_id: uuid.UUID) -> dict:
-    """Fetches analysis and land owned by user, returning detailed breakdown."""
+    """Fetches analysis and land owned by user (or unowned demo parcel), returning detailed breakdown."""
     result = await db.execute(
         select(Analysis, Land)
         .join(Land, Analysis.land_id == Land.id)
-        .where(Analysis.id == analysis_id, Land.user_id == user_id)
+        .where(
+            Analysis.id == analysis_id,
+            (Land.user_id == user_id) | (Land.user_id.is_(None))
+        )
     )
     row = result.first()
-    if row is None:
-        # Fallback to query by Analysis.id in case land was saved without user_id or under a shared context
-        result_fallback = await db.execute(
-            select(Analysis, Land)
-            .join(Land, Analysis.land_id == Land.id)
-            .where(Analysis.id == analysis_id)
-        )
-        row = result_fallback.first()
     if row is None:
         raise NotFoundError(entity="Analysis", identifier=str(analysis_id))
     analysis, land = row
@@ -973,7 +976,7 @@ async def get_user_analysis_history(
     limit: int = 50,
     offset: int = 0,
 ) -> dict:
-    """Fetches user's historical analyses with land details."""
+    """Fetches only the authenticated user's historical analyses with land details."""
     count_stmt = (
         select(func.count(Analysis.id))
         .join(Land, Analysis.land_id == Land.id)
@@ -990,21 +993,6 @@ async def get_user_analysis_history(
         .limit(limit)
     )
     rows = (await db.execute(stmt)).all()
-
-    # Fallback if no lands are directly tied to user_id (e.g. initial demo/local records)
-    if total == 0:
-        count_all = select(func.count(Analysis.id)).join(Land, Analysis.land_id == Land.id)
-        total_all = (await db.execute(count_all)).scalar() or 0
-        if total_all > 0:
-            stmt_all = (
-                select(Analysis, Land)
-                .join(Land, Analysis.land_id == Land.id)
-                .order_by(Analysis.created_at.desc())
-                .offset(offset)
-                .limit(limit)
-            )
-            rows = (await db.execute(stmt_all)).all()
-            total = total_all
 
     items = []
     for analysis, land in rows:
