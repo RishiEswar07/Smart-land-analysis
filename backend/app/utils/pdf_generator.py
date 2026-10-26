@@ -38,7 +38,7 @@ _BG_LIGHT = colors.HexColor("#F8FAFC")
 _BG_HEADER = colors.HexColor("#F1F5F9")
 
 _BRAND_GREEN_HEX = "#16A34A"
-_RISK_HEX = {"Low": "#16A34A", "Moderate": "#D97706", "High": "#DC2626"}
+_RISK_HEX = {"Low": "#16A34A", "Moderate": "#D97706", "High": "#DC2626", "Incomplete": "#64748B", "Unavailable": "#64748B"}
 
 
 def _risk_color_hex(level: str) -> str:
@@ -72,6 +72,7 @@ def generate_land_report_pdf(land: Land, analysis: Analysis, details: dict | Non
     impact_pos = ParagraphStyle("ImpactPos", parent=styles["Normal"], textColor=colors.HexColor("#15803D"), fontName="Helvetica-Bold", fontSize=8)
     impact_mod = ParagraphStyle("ImpactMod", parent=styles["Normal"], textColor=colors.HexColor("#B45309"), fontName="Helvetica-Bold", fontSize=8)
     impact_neg = ParagraphStyle("ImpactNeg", parent=styles["Normal"], textColor=colors.HexColor("#B91C1C"), fontName="Helvetica-Bold", fontSize=8)
+    impact_neu = ParagraphStyle("ImpactNeu", parent=styles["Normal"], textColor=colors.HexColor("#64748B"), fontName="Helvetica-Bold", fontSize=8)
 
     story = []
 
@@ -227,11 +228,17 @@ def generate_land_report_pdf(land: Land, analysis: Analysis, details: dict | Non
     factors_data = details.get("factors", []) if details else []
     if not factors_data:
         rb = analysis.risk_breakdown if isinstance(getattr(analysis, "risk_breakdown", None), dict) else {}
-        raw_flood = rb.get("flood_risk", {}).get("score", 10.0) if isinstance(rb.get("flood_risk"), dict) else 10.0
-        try:
-            flood_s = round(100.0 - float(raw_flood), 1)
-        except (ValueError, TypeError):
-            flood_s = 90.0
+        raw_flood = rb.get("flood_risk", {}).get("score") if isinstance(rb.get("flood_risk"), dict) else None
+        if raw_flood is not None:
+            try:
+                flood_s = round(100.0 - float(raw_flood), 1)
+                flood_imp = "Positive" if flood_s >= 70 else "Moderate"
+            except (ValueError, TypeError):
+                flood_s = None
+                flood_imp = "Data unavailable"
+        else:
+            flood_s = None
+            flood_imp = "Data unavailable"
 
         try:
             access_val = getattr(analysis, "traffic_accessibility_score", None)
@@ -245,7 +252,7 @@ def generate_land_report_pdf(land: Land, analysis: Analysis, details: dict | Non
         except (ValueError, TypeError):
             infra_s = 75.0
         factors_data = [
-            {"name": "Flood Safety", "score": flood_s, "impact": "Positive" if flood_s >= 70 else "Moderate", "weight": 0.35, "why_reason": "Topographic elevation baseline and river discharge hydrology modeling."},
+            {"name": "Flood Safety", "score": flood_s, "impact": flood_imp, "weight": 0.35, "why_reason": "Topographic elevation baseline and river discharge hydrology modeling."},
             {"name": "Road Accessibility", "score": access_s, "impact": "Positive" if access_s >= 70 else "Moderate", "weight": 0.25, "why_reason": "Roadway corridor right-of-way width and accessibility topology."},
             {"name": "Nearby Infrastructure", "score": infra_s, "impact": "Positive" if infra_s >= 70 else "Moderate", "weight": 0.25, "why_reason": "Municipal water utility and electricity power grid accessibility."},
             {"name": "Terrain", "score": 90.0, "impact": "Positive", "weight": 0.05, "why_reason": "Digital elevation model baseline indicates stable geomorphic terrain."},
@@ -256,7 +263,7 @@ def generate_land_report_pdf(land: Land, analysis: Analysis, details: dict | Non
 
     for f in factors_data:
         imp = f.get("impact", "Moderate")
-        imp_style = impact_pos if imp == "Positive" else (impact_neg if imp == "Negative" else impact_mod)
+        imp_style = impact_pos if imp == "Positive" else (impact_neg if imp == "Negative" else (impact_mod if imp == "Moderate" else impact_neu))
         w = f.get("weight")
         if w is None:
             w_str = "—"
@@ -287,7 +294,7 @@ def generate_land_report_pdf(land: Land, analysis: Analysis, details: dict | Non
 
     # ---------------- 5. Environmental, Hydrology & Historical Change ----------------
     story.append(Paragraph("5. Environmental, Hydrology & Historical Change", section_style))
-    flood_r = getattr(analysis, 'flood_risk', None) or "Low"
+    flood_r = getattr(analysis, 'flood_risk', None) or "Unavailable"
     env_r = getattr(analysis, 'environmental_risk', None) or "Low"
     env_rows = [
         [Paragraph("Flood Exposure", label_style), Paragraph(f"<b>{flood_r}</b> (Geospatial Elevation & Hydrology)", value_style)],
@@ -318,24 +325,23 @@ def generate_land_report_pdf(land: Land, analysis: Analysis, details: dict | Non
     for q in q_items:
         quality_rows.append([
             Paragraph(q.get("category", ""), bold_value_style),
-            Paragraph(f"{q.get('completeness_pct', 90):.0f}%", bold_value_style),
-            Paragraph(q.get("status", ""), value_style),
+            Paragraph(f"{q.get('completeness_pct', 0):.0f}%", bold_value_style),
+            Paragraph(q.get("status", "Verified"), value_style),
             Paragraph(q.get("basis", ""), value_style),
         ])
-    if len(quality_rows) > 1:
-        q_table = Table(quality_rows, colWidths=[4.2 * cm, 2.5 * cm, 3.5 * cm, 8.4 * cm])
-        q_table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), _BG_HEADER),
-            ("BOX", (0, 0), (-1, -1), 0.5, _LINE),
-            ("INNERGRID", (0, 0), (-1, -1), 0.5, _LINE),
-            ("TOPPADDING", (0, 0), (-1, -1), 2.5),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
-            ("LEFTPADDING", (0, 0), (-1, -1), 4),
-        ]))
-        story.append(q_table)
+    q_table = Table(quality_rows, colWidths=[4.0 * cm, 2.5 * cm, 4.5 * cm, 7.6 * cm])
+    q_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), _BG_HEADER),
+        ("BOX", (0, 0), (-1, -1), 0.5, _LINE),
+        ("INNERGRID", (0, 0), (-1, -1), 0.5, _LINE),
+        ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    story.append(q_table)
 
-    # ---------------- 7. Nearby Infrastructure & Essential Facilities ----------------
-    story.append(Paragraph("7. Nearby Infrastructure & Essential Facilities (Geodesic Proximity)", section_style))
+    # ---------------- 8. Nearby Infrastructure & Essential Facilities ----------------
+    story.append(Paragraph("8. Nearby Infrastructure & Essential Facilities (Geodesic Proximity)", section_style))
     fac_all = facilities_info.get("all_facilities", []) if isinstance(facilities_info, dict) else []
     if fac_all:
         fac_rows = [
@@ -371,16 +377,18 @@ def generate_land_report_pdf(land: Land, analysis: Analysis, details: dict | Non
         ]))
         story.append(fac_table)
     else:
-        story.append(
-            Paragraph(
-                "<i>No nearby facility points recorded within the queried search radius or live geospatial query was offline.</i>",
-                value_style,
-            )
-        )
+        status_val = facilities_info.get("status") if isinstance(facilities_info, dict) else None
+        if status_val == "empty":
+            empty_msg = "<i>No mapped facilities found within the searched radius in OpenStreetMap. Note: This indicates absence of mapped OSM records in this area, not necessarily the total absence of physical infrastructure.</i>"
+        elif status_val in ("unavailable", "failed"):
+            empty_msg = "<i>Geospatial facility proximity data was temporarily unavailable at the time of report generation.</i>"
+        else:
+            empty_msg = "<i>Nearby facility records unavailable for this parcel.</i>"
+        story.append(Paragraph(empty_msg, value_style))
 
-    # ---------------- 8. Regulatory Disclaimer ----------------
+    # ---------------- 9. Regulatory Disclaimer ----------------
     story.append(Spacer(1, 8))
-    story.append(Paragraph("8. Regulatory Disclaimer & Conditions", section_style))
+    story.append(Paragraph("9. Regulatory Disclaimer & Conditions", section_style))
     story.append(HRFlowable(width="100%", color=_LINE, thickness=1))
     story.append(Spacer(1, 3))
     story.append(
@@ -388,7 +396,7 @@ def generate_land_report_pdf(land: Land, analysis: Analysis, details: dict | Non
             "<b>OFFICIAL REGULATORY DISCLAIMER:</b> This analysis is a GIS-based decision-support assessment. "
             "It does not constitute government approval, legal clearance, land-title verification, environmental clearance, "
             "or structural engineering certification. Site boundaries, road widths, and flood projections are synthesized "
-            "from publicly available geospatial records and trained machine learning models. A registered civil surveyor must "
+            "from publicly available geospatial records and statistical models. A registered civil surveyor must "
             "inspect the physical parcel prior to capital expenditure.",
             disclaimer_style,
         )

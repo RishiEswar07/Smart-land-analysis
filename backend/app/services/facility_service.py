@@ -274,9 +274,9 @@ async def _execute_fetch(
                 resp = await client.post(endpoint, data={"data": query}, headers=headers)
                 if resp.status_code == 200:
                     data = resp.json()
-                    elements = data.get("elements", [])
-                    if len(elements) > 0:
+                    if isinstance(data, dict) and "elements" in data:
                         overpass_succeeded = True
+                        elements = data.get("elements", [])
                         logger.info(f"Overpass success from {endpoint}: {len(elements)} elements retrieved")
                         break
                 else:

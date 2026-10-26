@@ -71,15 +71,15 @@ export default function About() {
       </section>
 
       <section className="max-w-5xl mx-auto px-5 sm:px-8 py-16">
-        <h2 className="text-xl font-display font-bold text-ink mb-4">How the Machine Learning Works</h2>
+        <h2 className="text-xl font-display font-bold text-ink mb-4">How the Risk Scoring & Machine Learning Work</h2>
         <p className="text-sm text-slate leading-relaxed max-w-3xl">
-          The core ML pipeline utilizes a Scikit-learn Random Forest model trained on engineered
-          geotechnical and geospatial features (soil load-bearing capacity, terrain slope gradient,
-          flood frequency, infrastructure accessibility, and parcel geometry). The backend exposes a
-          low-latency inference service that evaluates feature vectors alongside deterministic zoning
-          and minimum plot dimension constraints (Individual House, Apartment, Commercial Building,
-          School, Hospital). The models operate strictly in inference mode to guarantee sub-second
-          deterministic evaluations.
+          The platform combines rule-based geotechnical risk evaluations with a Scikit-learn Random Forest model
+          trained on engineered baseline datasets (soil properties, terrain elevation, infrastructure accessibility,
+          and parcel geometry). Hydrological flood risk and environmental factors are calculated directly from
+          external terrain elevation and satellite land-cover observations; when external telemetry is unavailable,
+          the system explicitly reports assessments as Incomplete or Unavailable rather than substituting fabricated defaults.
+          Evaluations incorporate deterministic zoning and building dimensional rules (Individual House, Apartment,
+          Commercial Building, School, Hospital) to support preliminary feasibility reviews.
         </p>
       </section>
     </div>

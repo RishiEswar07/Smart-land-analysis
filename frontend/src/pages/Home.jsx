@@ -15,7 +15,7 @@ const features = [
   {
     icon: '🧠',
     title: 'ML, not guesswork',
-    desc: 'A trained Random Forest / XGBoost pipeline scores suitability and recommends the best-fit building type, with reasoning.',
+    desc: 'A Random Forest model and rule-based evaluation score suitability and recommend building types with factor breakdowns.',
   },
   {
     icon: '🌊',

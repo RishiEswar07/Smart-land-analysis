@@ -6,6 +6,8 @@ REST API endpoints for the AI Suitability module (Module 6).
 Endpoints:
     POST /api/v1/analysis/predict   body: { land_id }
     GET  /api/v1/analysis/{id}
+    GET  /api/v1/analysis/{id}/details
+    GET  /api/v1/analysis/history
 
 Matches src/services/analysisService.js on the frontend exactly.
 """
@@ -59,11 +61,11 @@ async def predict(
     current_user: User = Depends(get_current_user),
 ) -> AnalysisResponse:
     """
-    Runs the suitability scoring engine against the given land and
-    persists the result. Returns 404 if the land doesn't exist.
+    Runs the suitability scoring engine against the given land owned by the user and
+    persists the result. Returns 404 if the land doesn't exist or is not owned by user.
     """
     try:
-        analysis = await analysis_service.predict_for_land(db, payload.land_id)
+        analysis = await analysis_service.predict_for_land(db, payload.land_id, user_id=current_user.id)
     except NotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return AnalysisResponse.model_validate(analysis)
@@ -99,10 +101,9 @@ async def get_analysis(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> AnalysisResponse:
-    """Fetches one analysis result. Returns 404 if it doesn't exist."""
+    """Fetches one analysis result owned by the user. Returns 404 if it doesn't exist or not owned."""
     try:
-        analysis = await analysis_service.get_analysis(db, analysis_id)
+        analysis = await analysis_service.get_analysis(db, analysis_id, user_id=current_user.id)
     except NotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return AnalysisResponse.model_validate(analysis)
-

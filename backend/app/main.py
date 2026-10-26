@@ -27,14 +27,14 @@ async def lifespan(app: FastAPI):
     Runs once on startup and once on shutdown.
     Verifies DB connectivity without crashing the process if the database
     is waking up or temporarily spinning up (e.g. Supabase cold starts).
-    Also ensures all required database tables exist.
+    In development mode, initializes tables if needed; in production, relies on Alembic migrations.
     """
     import os
     import re
 
     logger.info("Starting %s [%s environment]", settings.APP_NAME, settings.APP_ENV)
 
-    is_cloud = bool(os.environ.get("RENDER")) or settings.APP_ENV == "production"
+    is_cloud = bool(os.environ.get("RENDER")) or settings.APP_ENV in ("production", "staging")
     db_url = settings.DATABASE_URL
 
     if not db_url or "localhost" in db_url or "127.0.0.1" in db_url:
@@ -49,19 +49,22 @@ async def lifespan(app: FastAPI):
     sanitized_url = re.sub(r":([^:@]+)@", ":****@", db_url) if db_url else "UNCONFIGURED"
     logger.info("Configured Database URL: %s", sanitized_url)
 
-    # Verify database connectivity and initialize tables if needed
+    # Verify database connectivity
     try:
         from app.db.session import engine
-        from app.db.base import Base
         from sqlalchemy import text
 
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
         logger.info("Database connection verified successfully.")
 
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        logger.info("Database schema verified / initialized.")
+        if settings.APP_ENV not in ("production", "staging"):
+            from app.db.base import Base
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            logger.info("Database schema verified / initialized (development mode create_all).")
+        else:
+            logger.info("Production/Staging mode: schema management handled via Alembic migrations.")
     except Exception as exc:
         sanitized_exc = re.sub(r":([^:@]+)@", ":****@", str(exc))
         logger.warning(
@@ -105,34 +108,35 @@ def create_application() -> FastAPI:
     )
 
     # ---------------- CORS ----------------
-    # Allows Vercel production frontend and local dev environments
-    default_origins = [
-        "https://analysis.vercel.app",
-        "https://smart-land-analysis.vercel.app",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:5174",
-        "http://127.0.0.1:5174",
-    ]
+    # In development mode, standard local frontend dev origins are allowed.
+    # In production mode, origins must be specified via BACKEND_CORS_ORIGINS (or fallback to production domain).
+    # Wildcards and loose regexes across arbitrary subdomains are forbidden.
     configured_origins = list(settings.BACKEND_CORS_ORIGINS) if settings.BACKEND_CORS_ORIGINS else []
-    
-    # Merge configured origins with default origins
-    for orig in default_origins:
-        if orig not in configured_origins:
-            configured_origins.append(orig)
+
+    if settings.APP_ENV not in ("production", "staging"):
+        dev_origins = [
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost:5174",
+            "http://127.0.0.1:5174",
+        ]
+        for orig in dev_origins:
+            if orig not in configured_origins:
+                configured_origins.append(orig)
+    else:
+        if not configured_origins:
+            configured_origins = ["https://smart-land-analysis.vercel.app"]
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=configured_origins if "*" not in configured_origins else ["*"],
-        allow_origin_regex=r"https://.*\.vercel\.app|http://(localhost|127\.0\.0\.1)(:\d+)?" if "*" not in configured_origins else None,
+        allow_origins=configured_origins,
         allow_credentials=True,
-        allow_methods=["*"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
         allow_headers=["*"],
         expose_headers=["Content-Disposition", "content-disposition"],
     )
 
     # ---------------- Global Exception Handler ----------------
-    # Ensures that unhandled errors (e.g. database disconnect) still return proper CORS headers
     from fastapi import Request
     from fastapi.responses import JSONResponse
 
@@ -195,7 +199,7 @@ def create_application() -> FastAPI:
         import os
         import re
 
-        is_cloud = bool(os.environ.get("RENDER")) or settings.APP_ENV == "production"
+        is_cloud = bool(os.environ.get("RENDER")) or settings.APP_ENV in ("production", "staging")
         db_url = settings.DATABASE_URL
 
         if is_cloud and (not db_url or "localhost" in db_url or "127.0.0.1" in db_url):

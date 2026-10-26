@@ -1,29 +1,32 @@
 # Smart Land Analysis Platform
 
-**AI & GIS-Based Decision Support System for Land Feasibility & Building Planning** — Final Year Engineering Project
+**Decision Support System for Land Feasibility & Building Planning** — Final Year Engineering Project
 
-Register, log in, draw a plot boundary or enter direct area measurements on a satellite map, and get a Scikit-Learn ML suitability prediction, recommended building type, and explainable multi-factor Risk Score — enriched with live OpenStreetMap geospatial infrastructure, ISRIC SoilGrids taxonomy, and downloadable PDF & Excel reports.
+Register, log in, draw a plot boundary or enter direct area measurements on a satellite map, and get suitability scoring, recommended building types, and explainable multi-factor Risk Scores — enriched with live OpenStreetMap geospatial infrastructure, ISRIC SoilGrids taxonomy, ESA WorldCover satellite imagery, and downloadable PDF & Excel reports.
 
-\Smart-Land-Analysis-Platform/
-├── backend/     — FastAPI (Python 3.11) + Supabase PostgreSQL + Scikit-Learn
+```
+Smart-Land-Analysis-Platform/
+├── backend/     — FastAPI (Python) + Supabase PostgreSQL + Scikit-Learn
 ├── frontend/    — React 18 (Vite) + MapLibre GL + Turf.js + Tailwind CSS
 └── README.md    — Project documentation & setup guide
-\
+```
+
 ---
 
-## 1. Verified Technology Stack
+## 1. Technology Stack
 
 | Layer | Technology | Role & Purpose |
 |---|---|---|
 | **Frontend Framework** | React 18, Vite | Component-driven UI, state management, fast client builds |
 | **Geospatial Mapping** | MapLibre GL, Turf.js | Satellite basemaps, polygon vector drawing, geodesic ellipsoidal area math |
 | **Styling & Visualization** | Tailwind CSS, Recharts | Responsive layout, metric gauges, building distribution charts |
-| **Backend Framework** | FastAPI (Python 3.11) | High-performance asynchronous REST API with Pydantic validation |
+| **Backend Framework** | FastAPI (Python) | High-performance asynchronous REST API with Pydantic validation |
 | **Database & ORM** | Supabase PostgreSQL, SQLAlchemy 2.0 | Async connection pool, schema migrations (Alembic), GeoJSON boundary storage |
-| **Machine Learning** | Scikit-Learn (Random Forest) | Offline-trained classifier & regressor for suitability and building classification |
+| **Scoring & Machine Learning** | Rule-Based Scoring + Scikit-Learn (Random Forest) | Rule-based environmental and infrastructure risk scoring with a machine-learning component trained on synthetic data |
+| **Authentication** | python-jose[cryptography], passlib[bcrypt] | Cryptographically signed JWT tokens (HS256) and salted bcrypt password hashing |
 | **Export Reporting** | ReportLab, openpyxl | Programmatic PDF document generation & multi-worksheet Excel workbooks (.xlsx) |
-| **External Geospatial APIs** | OpenStreetMap Overpass | Live queries for 8 essential nearby facility categories with Haversine km distances |
-| **Environmental Telemetry** | ISRIC SoilGrids, Open-Meteo | WRB soil classification & hydrological flood risk exposure |
+| **External Geospatial APIs** | OpenStreetMap Overpass & Nominatim | Live queries for 8 essential nearby facility categories with geodesic Haversine km distances |
+| **Environmental Telemetry** | ISRIC SoilGrids, Open-Meteo, ESA WorldCover | WRB soil classification, Copernicus DEM elevation, and 10m satellite land cover |
 
 ---
 
@@ -31,52 +34,52 @@ Register, log in, draw a plot boundary or enter direct area measurements on a sa
 
 | Feature | Implementation Details | Status |
 |---|---|---|
-| **Authentication & RBAC** | JWT token authentication (PyJWT), bcrypt salted password hashing, route guards | ✅ Fully Verified |
-| **Accurate Land Delineation** | True geodesic polygon area calculation via Turf.js + Direct Area User Input (sq.ft, m², cents, acres) | ✅ Fully Verified |
-| **No Fixed 2400 sq.ft Bug** | Removed all synthetic 15m boxes and hardcoded defaults; dynamic fallback to user-specified dimensions | ✅ Fully Verified |
-| **ML Feasibility Assessment** | Scikit-Learn Random Forest evaluating geotechnical & environmental feature vectors | ✅ Fully Verified |
-| **Plot Size Validation** | Minimum required plot area checks per building type (House: 400 sq.ft, Apartment: 2k, School: 5k, etc.) | ✅ Fully Verified |
-| **Nearby Facilities (8 Categories)** | Live Overpass query with geodesic straight-line distance (km) for Bus, Train, Airport, Hospital, School, Shops, Roads, Water | ✅ Fully Verified |
-| **Construction Cost Removed** | Construction cost estimates cleanly removed across schemas, UI, PDF, and Excel | ✅ Fully Verified |
-| **Multi-Format Exports** | Professional PDF reports (ReportLab) and comprehensive Excel workbooks (openpyxl) | ✅ Fully Verified |
-| **User Dashboard** | Aggregate parcel metrics, building distribution charts, and recent analyses table | ✅ Fully Verified |
+| **Authentication & Ownership Isolation** | JWT token authentication, bcrypt password hashing, strict ownership enforcement across lands, analyses, and reports | ✅ Verified |
+| **Accurate Land Delineation** | True geodesic polygon area calculation via Turf.js + Direct Area User Input (sq.ft, m², cents, acres) | ✅ Verified |
+| **Environmental Reliability** | Real telemetry from Copernicus DEM and ESA WorldCover; missing measurements marked as unavailable rather than assigned fake low risks | ✅ Verified |
+| **Plot Size Validation** | Minimum required plot area checks per building type (House: 400 sq.ft, Apartment: 2k, School: 5k, etc.) | ✅ Verified |
+| **Nearby Facilities (8 Categories)** | Live Overpass query with straight-line geodesic distance (km) across 8 categories; distinct empty and unavailable states | ✅ Verified |
+| **Multi-Format Exports** | Professional PDF reports (ReportLab) and comprehensive Excel workbooks (openpyxl) reflecting true data availability | ✅ Verified |
+| **User Dashboard** | User-isolated parcel metrics, building distribution charts, and recent analyses table | ✅ Verified |
 
 ---
 
-## 3. Machine Learning & Geospatial Architecture
+## 3. Methodology & Architecture Transparency
 
-1. **Suitability Model**: A trained Scikit-learn Random Forest model (\model.pkl\, \scaler.pkl\, \label_encoder.pkl\) ingests normalized feature vectors representing soil bearing capacity, slope gradient, flood vulnerability, and road access.
-2. **Deterministic Constraint Layer**: Enforces zoning compliance and minimum land footprint requirements. If a parcel is under the required threshold for a hospital or school, the engine flags it as unsuitable regardless of raw soil score.
-3. **Geodesic Distance Proximity**: All facility distances are computed using the Haversine formula on the WGS84 Earth sphere ( = 6,371.0	ext{ km}$) directly from the parcel centroid.
+1. **Scoring Engine**: Rule-based environmental and infrastructure risk scoring with a machine-learning component trained on synthetic baseline data. Machine-learning models (RandomForestRegressor and RandomForestClassifier) provide baseline multi-factor weighting and building classification probabilities, while deterministic physical models govern flood risk, ESA WorldCover satellite constraints, and plot footprint minimums.
+2. **Environmental Telemetry**: Real-time DEM elevation and river discharge are retrieved from Open-Meteo. If external telemetry is unreachable, the system explicitly reports the factor as "Unavailable" rather than substituting an arbitrary default or presenting an inaccurate "Low Risk" rating.
+3. **Geodesic Distance Proximity**: All facility distances represent straight-line geodesic distance calculated via the Haversine formula on the WGS84 Earth sphere ($R = 6,371.0\text{ km}$) directly from the parcel centroid or representative coordinates. Driving routes and navigation distances may vary based on street networks.
+4. **Data Limitations**: OpenStreetMap facility queries identify mapped records within the searched radius. The absence of mapped records indicates lack of data in OpenStreetMap rather than guaranteed physical absence of real-world infrastructure.
 
 ---
 
 ## 4. Local Development Setup
 
-### 4.1 Backend Setup (\ackend/\)
-\\ash
+### 4.1 Backend Setup (`backend/`)
+
+```bash
 cd backend
 python -m venv venv
-
-# macOS / Linux: source venv/bin/activate
-# Windows: venv\Scripts\activate
+# On Windows:
+.\venv\Scripts\activate
+# On Linux/macOS:
+source venv/bin/activate
 
 pip install -r requirements.txt
 cp .env.example .env
-# Configure DATABASE_URL (PostgreSQL) and JWT_SECRET_KEY
+# Configure JWT_SECRET_KEY and DATABASE_URL in .env
+
+# Run migrations
 alembic upgrade head
-uvicorn app.main:app --reload
-\- API base: \http://localhost:8000/api/v1- Swagger documentation: \http://localhost:8000/api/v1/docs- Health endpoint: \http://localhost:8000/api/v1/health
-### 4.2 Frontend Setup (\rontend/\)
-\\ash
+
+# Start backend server
+uvicorn app.main:app --reload --port 8000
+```
+
+### 4.2 Frontend Setup (`frontend/`)
+
+```bash
 cd frontend
 npm install
-cp .env.example .env
-# Set VITE_API_BASE_URL=http://localhost:8000/api/v1
 npm run dev
-\- Web application: \http://localhost:5173
----
-
-## 5. Regulatory Notice & Academic Disclaimer
-
-This application is an engineering decision-support tool developed for academic research and site-feasibility pre-screening. It does not replace on-site physical geotechnical borehole testing, structural engineering designs, or certified land cadastral title surveys.
+```

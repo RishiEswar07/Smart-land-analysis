@@ -82,9 +82,9 @@ async def get_land(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> LandResponse:
-    """Fetches one land record. Returns 404 if it doesn't exist. Requires login."""
+    """Fetches one land record owned by the current user. Returns 404 if it doesn't exist or not owned."""
     try:
-        land = await land_service.get_land(db, land_id)
+        land = await land_service.get_land(db, land_id, user_id=current_user.id)
     except NotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return LandResponse.model_validate(land)
@@ -101,9 +101,9 @@ async def get_land_facilities(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Fetches real nearby facilities around the parcel using OpenStreetMap Overpass."""
+    """Fetches real nearby facilities around the parcel owned by current user using OpenStreetMap Overpass."""
     try:
-        land = await land_service.get_land(db, land_id)
+        land = await land_service.get_land(db, land_id, user_id=current_user.id)
     except NotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -150,11 +150,11 @@ async def update_land(
     current_user: User = Depends(get_current_user),
 ) -> LandResponse:
     """
-    Updates only the fields provided in the request body.
-    Returns 404 if the land doesn't exist, 422 if the payload is invalid.
+    Updates only the fields provided in the request body for land owned by current user.
+    Returns 404 if the land doesn't exist or is not owned, 422 if the payload is invalid.
     """
     try:
-        land = await land_service.update_land(db, land_id, payload)
+        land = await land_service.update_land(db, land_id, payload, user_id=current_user.id)
     except NotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return LandResponse.model_validate(land)
@@ -170,9 +170,9 @@ async def delete_land(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> None:
-    """Deletes a land record. Returns 404 if it doesn't exist."""
+    """Deletes a land record owned by current user. Returns 404 if it doesn't exist or is not owned."""
     try:
-        await land_service.delete_land(db, land_id)
+        await land_service.delete_land(db, land_id, user_id=current_user.id)
     except NotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     # 204 No Content — no response body returned

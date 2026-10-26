@@ -36,7 +36,7 @@ async def generate_report(db: AsyncSession, analysis_id: uuid.UUID, user_id: uui
         .join(Land, Analysis.land_id == Land.id)
         .where(
             Analysis.id == analysis_id,
-            (Land.user_id == user_id) | (Land.user_id.is_(None))
+            Land.user_id == user_id,
         )
     )
     row = result.first()
@@ -66,7 +66,7 @@ async def get_or_generate_pdf_bytes(db: AsyncSession, analysis_id: uuid.UUID, us
         .join(Land, Analysis.land_id == Land.id)
         .where(
             Analysis.id == analysis_id,
-            (Land.user_id == user_id) | (Land.user_id.is_(None))
+            Land.user_id == user_id,
         )
     )
     row = result.first()
@@ -86,7 +86,7 @@ async def get_or_generate_excel_report(db: AsyncSession, analysis_id: uuid.UUID,
         .join(Land, Analysis.land_id == Land.id)
         .where(
             Analysis.id == analysis_id,
-            (Land.user_id == user_id) | (Land.user_id.is_(None))
+            Land.user_id == user_id,
         )
     )
     row = result.first()
@@ -106,7 +106,7 @@ async def get_or_generate_json_report(db: AsyncSession, analysis_id: uuid.UUID, 
         .join(Land, Analysis.land_id == Land.id)
         .where(
             Analysis.id == analysis_id,
-            (Land.user_id == user_id) | (Land.user_id.is_(None))
+            Land.user_id == user_id,
         )
     )
     row = result.first()
@@ -127,7 +127,7 @@ async def get_report_file(db: AsyncSession, report_id: uuid.UUID, user_id: uuid.
         .join(Land, Report.land_id == Land.id)
         .where(
             Report.id == report_id,
-            (Land.user_id == user_id) | (Land.user_id.is_(None))
+            Land.user_id == user_id,
         )
     )
     row = result.first()

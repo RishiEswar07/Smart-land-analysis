@@ -28,12 +28,15 @@ async def create_land(db: AsyncSession, payload: LandCreate, user_id: uuid.UUID 
     return land
 
 
-async def get_land(db: AsyncSession, land_id: uuid.UUID) -> Land:
+async def get_land(db: AsyncSession, land_id: uuid.UUID, user_id: uuid.UUID | None = None) -> Land:
     """
-    Fetches a single Land by id.
-    Raises NotFoundError if no matching row exists.
+    Fetches a single Land by id, optionally enforcing user ownership.
+    Raises NotFoundError if no matching row exists or if not owned by the user.
     """
-    result = await db.execute(select(Land).where(Land.id == land_id))
+    stmt = select(Land).where(Land.id == land_id)
+    if user_id is not None:
+        stmt = stmt.where(Land.user_id == user_id)
+    result = await db.execute(stmt)
     land = result.scalar_one_or_none()
     if land is None:
         raise NotFoundError(entity="Land", identifier=str(land_id))
@@ -69,13 +72,16 @@ async def list_lands(
     return lands, total
 
 
-async def update_land(db: AsyncSession, land_id: uuid.UUID, payload: LandUpdate) -> Land:
+async def update_land(
+    db: AsyncSession, land_id: uuid.UUID, payload: LandUpdate, user_id: uuid.UUID | None = None
+) -> Land:
     """
     Partially updates a Land record — only fields explicitly set in
     the request body are applied (`exclude_unset=True`).
-    Raises NotFoundError if the land doesn't exist.
+    Enforces user ownership if user_id is supplied.
+    Raises NotFoundError if the land doesn't exist or is not owned by user.
     """
-    land = await get_land(db, land_id)  # raises NotFoundError if missing
+    land = await get_land(db, land_id, user_id=user_id)
 
     update_data = payload.model_dump(exclude_unset=True)
     for field, value in update_data.items():
@@ -86,11 +92,11 @@ async def update_land(db: AsyncSession, land_id: uuid.UUID, payload: LandUpdate)
     return land
 
 
-async def delete_land(db: AsyncSession, land_id: uuid.UUID) -> None:
+async def delete_land(db: AsyncSession, land_id: uuid.UUID, user_id: uuid.UUID | None = None) -> None:
     """
-    Deletes a Land record.
-    Raises NotFoundError if the land doesn't exist.
+    Deletes a Land record. Enforces user ownership if user_id is supplied.
+    Raises NotFoundError if the land doesn't exist or is not owned by user.
     """
-    land = await get_land(db, land_id)  # raises NotFoundError if missing
+    land = await get_land(db, land_id, user_id=user_id)
     await db.delete(land)
     await db.commit()

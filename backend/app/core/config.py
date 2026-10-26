@@ -11,14 +11,14 @@ file via pydantic-settings, validated, and cached as a singleton.
 from functools import lru_cache
 from typing import List
 
-from pydantic import Field, computed_field
+from pydantic import Field, computed_field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """
     Strongly typed application settings.
-    Supports standard single DATABASE_URL deployment environments (Render, Supabase, etc.).
+    Requires essential configuration through environment variables and rejects insecure defaults.
     """
 
     # ---------------- App ----------------
@@ -29,7 +29,7 @@ class Settings(BaseSettings):
 
     # ---------------- Database ----------------
     DATABASE_URL_RAW: str = Field(
-        default="postgresql+asyncpg://postgres:SmartLand%402026@localhost:5432/smart_land_db",
+        default="",
         validation_alias="DATABASE_URL",
     )
     DATABASE_URL_SYNC_RAW: str = Field(
@@ -38,7 +38,10 @@ class Settings(BaseSettings):
     )
 
     # ---------------- JWT ----------------
-    JWT_SECRET_KEY: str = "smart-land-analysis-platform-secret-key-2026"
+    JWT_SECRET_KEY: str = Field(
+        default="",
+        validation_alias="JWT_SECRET_KEY",
+    )
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
@@ -48,6 +51,25 @@ class Settings(BaseSettings):
 
     # ---------------- Reports ----------------
     REPORTS_DIR: str = "generated_reports"
+
+    @model_validator(mode="after")
+    def validate_critical_secrets(self) -> "Settings":
+        key = (self.JWT_SECRET_KEY or "").strip()
+        insecure_default = "smart-land-analysis-platform-secret-key-2026"
+        if not key or key == insecure_default:
+            if self.APP_ENV == "test":
+                self.JWT_SECRET_KEY = "test-jwt-secret-key-for-unit-testing-32-chars-long!"
+            else:
+                raise ValueError(
+                    "JWT_SECRET_KEY environment variable is required and must not use insecure default values."
+                )
+
+        db_raw = (self.DATABASE_URL_RAW or "").strip()
+        if not db_raw and self.APP_ENV in ("production", "staging"):
+            raise ValueError(
+                "DATABASE_URL environment variable is required in production and staging environments."
+            )
+        return self
 
     @computed_field  # type: ignore[misc]
     @property
@@ -115,8 +137,11 @@ class Settings(BaseSettings):
         if not raw:
             return []
         if raw == "*":
+            # Wildcard is rejected in production and staging
+            if self.APP_ENV in ("production", "staging"):
+                return []
             return ["*"]
-        return [origin.strip() for origin in raw.split(",") if origin.strip()]
+        return [origin.strip() for origin in raw.split(",") if origin.strip() and origin.strip() != "*"]
 
     model_config = SettingsConfigDict(
         env_file=".env",

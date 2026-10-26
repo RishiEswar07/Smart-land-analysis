@@ -9,9 +9,13 @@ data sources provenance, and regulatory disclaimers.
 
 from io import BytesIO
 from datetime import datetime
-import openpyxl
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.utils import get_column_letter
+
+try:
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+except ImportError:
+    openpyxl = None
 
 from app.models.land import Land
 from app.models.analysis import Analysis
@@ -19,8 +23,11 @@ from app.utils.area_units import get_all_area_conversions
 
 
 def generate_land_report_excel(land: Land, analysis: Analysis, details: dict) -> bytes:
+    if openpyxl is None:
+        raise RuntimeError("openpyxl is not installed. Please install openpyxl to generate Excel reports.")
+
     wb = openpyxl.Workbook()
-    
+
     navy_fill = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
     blue_header_fill = PatternFill(start_color="2563EB", end_color="2563EB", fill_type="solid")
     light_blue_fill = PatternFill(start_color="EFF6FF", end_color="EFF6FF", fill_type="solid")
@@ -28,14 +35,15 @@ def generate_land_report_excel(land: Land, analysis: Analysis, details: dict) ->
     accent_green_fill = PatternFill(start_color="DCFCE7", end_color="DCFCE7", fill_type="solid")
     accent_yellow_fill = PatternFill(start_color="FEF3C7", end_color="FEF3C7", fill_type="solid")
     accent_red_fill = PatternFill(start_color="FEE2E2", end_color="FEE2E2", fill_type="solid")
-    
+    neutral_fill = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid")
+
     title_font = Font(name="Calibri", size=16, bold=True, color="FFFFFF")
     section_font = Font(name="Calibri", size=12, bold=True, color="1E3A8A")
     header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
     bold_font = Font(name="Calibri", size=11, bold=True, color="0F172A")
     regular_font = Font(name="Calibri", size=11, color="334155")
     small_gray_font = Font(name="Calibri", size=9, italic=True, color="64748B")
-    
+
     thin_border_side = Side(border_style="thin", color="CBD5E1")
     border = Border(left=thin_border_side, right=thin_border_side, top=thin_border_side, bottom=thin_border_side)
 
@@ -59,7 +67,7 @@ def generate_land_report_excel(land: Land, analysis: Analysis, details: dict) ->
     area_sqm = float(area_conv.get("sqm") or all_conversions["sqm"])
     area_cents = float(area_conv.get("cents") or all_conversions["cents"])
     area_acres = float(area_conv.get("acres") or all_conversions["acres"])
-    
+
     area_source = getattr(land, "area_source", "polygon") or details.get("property_info", {}).get("area_source", "polygon")
     area_source_label = "User-entered Land Area" if area_source == "direct_input" else "Area calculated from selected land boundary"
 
@@ -106,7 +114,7 @@ def generate_land_report_excel(land: Land, analysis: Analysis, details: dict) ->
         ws_summary[f"A{idx}"].font = bold_font
         ws_summary[f"A{idx}"].fill = light_gray_fill
         ws_summary[f"A{idx}"].border = border
-        
+
         ws_summary.merge_cells(f"B{idx}:F{idx}")
         ws_summary[f"B{idx}"] = val
         ws_summary[f"B{idx}"].font = regular_font
@@ -131,7 +139,7 @@ def generate_land_report_excel(land: Land, analysis: Analysis, details: dict) ->
         ws_summary[f"A{idx}"].font = bold_font
         ws_summary[f"A{idx}"].fill = light_gray_fill
         ws_summary[f"A{idx}"].border = border
-        
+
         ws_summary.merge_cells(f"B{idx}:F{idx}")
         ws_summary[f"B{idx}"] = val
         ws_summary[f"B{idx}"].font = bold_font if "Status" in label else regular_font
@@ -147,9 +155,9 @@ def generate_land_report_excel(land: Land, analysis: Analysis, details: dict) ->
         ("Overall Suitability Score", f"{getattr(analysis, 'suitability_score', 0):.1f}%" if getattr(analysis, 'suitability_score', None) is not None else "N/A", "Out of 100% (Higher = More Suitable)"),
         ("Recommended Building Type", getattr(analysis, 'recommended_building_type', None) or getattr(analysis, 'building_type', 'N/A'), "Optimal developmental footprint"),
         ("Aggregated Risk Score", f"{getattr(analysis, 'risk_score', 0):.1f}%" if getattr(analysis, 'risk_score', None) is not None else "N/A", "Composite risk across 4 key dimensions"),
-        ("Overall Risk Level", getattr(analysis, 'risk_level', 'N/A'), "Banded Risk Classification (Low/Moderate/High)"),
-        ("Flood Risk Exposure", getattr(analysis, 'flood_risk', 'Low'), "Hydrological elevation & discharge assessment"),
-        ("Environmental Risk", getattr(analysis, 'environmental_risk', 'Low'), "Satellite land cover & ecological sensitivity"),
+        ("Overall Risk Level", getattr(analysis, 'risk_level', 'N/A'), "Banded Risk Classification (Low/Moderate/High/Incomplete)"),
+        ("Flood Risk Exposure", getattr(analysis, 'flood_risk', 'N/A'), "Hydrological elevation & discharge assessment"),
+        ("Environmental Risk", getattr(analysis, 'environmental_risk', 'N/A'), "Satellite land cover & ecological sensitivity"),
         ("Infrastructure Score", f"{getattr(analysis, 'infrastructure_score', 0):.1f}%" if getattr(analysis, 'infrastructure_score', None) is not None else "N/A", "Utility grid proximity index"),
         ("Accessibility Score", f"{getattr(analysis, 'traffic_accessibility_score', 0):.1f}%" if getattr(analysis, 'traffic_accessibility_score', None) is not None else "N/A", "Corridor width & highway accessibility"),
     ]
@@ -160,33 +168,25 @@ def generate_land_report_excel(land: Land, analysis: Analysis, details: dict) ->
         ws_summary[f"A{idx}"].fill = light_blue_fill
         ws_summary[f"A{idx}"].border = border
 
+        ws_summary.merge_cells(f"B{idx}:C{idx}")
         ws_summary[f"B{idx}"] = val
         ws_summary[f"B{idx}"].font = bold_font
         ws_summary[f"B{idx}"].alignment = Alignment(horizontal="center")
         ws_summary[f"B{idx}"].border = border
 
-        ws_summary.merge_cells(f"C{idx}:F{idx}")
-        ws_summary[f"C{idx}"] = note
-        ws_summary[f"C{idx}"].font = regular_font
-        ws_summary[f"C{idx}"].border = border
+        ws_summary.merge_cells(f"D{idx}:F{idx}")
+        ws_summary[f"D{idx}"] = note
+        ws_summary[f"D{idx}"].font = regular_font
+        ws_summary[f"D{idx}"].border = border
 
-    expl_r = start_r + len(suitability_metrics) + 2
-    ws_summary[f"A{expl_r}"] = "4. Analysis Explanation & Reasoning"
-    ws_summary[f"A{expl_r}"].font = section_font
-
-    ws_summary.merge_cells(f"A{expl_r+1}:F{expl_r+3}")
-    ws_summary[f"A{expl_r+1}"] = analysis.ai_explanation if analysis else "Analysis completed."
-    ws_summary[f"A{expl_r+1}"].font = regular_font
-    ws_summary[f"A{expl_r+1}"].alignment = Alignment(wrap_text=True, vertical="top")
-
-    # 2. Factor Breakdown
-    ws_factors = wb.create_sheet(title="Factor Breakdown")
+    # 2. Factors Breakdown
+    ws_factors = wb.create_sheet(title="Factors & Explanations")
     ws_factors.views.sheetView[0].showGridLines = True
 
     ws_factors.merge_cells("A1:F2")
-    ws_factors["A1"] = "DETAILED FACTOR SCORE BREAKDOWN & IMPACT ASSESSMENT"
+    ws_factors["A1"] = "DETAILED FACTOR SCORES & PHYSICAL REASONS"
     ws_factors["A1"].font = title_font
-    ws_factors["A1"].fill = blue_header_fill
+    ws_factors["A1"].fill = navy_fill
     ws_factors["A1"].alignment = Alignment(horizontal="center", vertical="center")
 
     headers_factors = ["Factor Name", "Score (0-100)", "Impact", "Weight in Risk", "Why this score? (Physical Reason)", "Assessment Basis / Methodology"]
@@ -202,8 +202,9 @@ def generate_land_report_excel(land: Land, analysis: Analysis, details: dict) ->
         c1 = ws_factors.cell(row=r_idx, column=1, value=f.get("name", ""))
         c1.font = bold_font
         c1.border = border
-        
-        c2 = ws_factors.cell(row=r_idx, column=2, value=f"{f['score']:.1f}" if f.get("score") is not None else "N/A")
+
+        score_val = f.get("score")
+        c2 = ws_factors.cell(row=r_idx, column=2, value=f"{score_val:.1f}" if score_val is not None else "N/A")
         c2.font = bold_font
         c2.alignment = Alignment(horizontal="center")
         c2.border = border
@@ -219,6 +220,8 @@ def generate_land_report_excel(land: Land, analysis: Analysis, details: dict) ->
             c3.fill = accent_yellow_fill
         elif impact == "Negative":
             c3.fill = accent_red_fill
+        else:
+            c3.fill = neutral_fill
 
         w = f.get("weight")
         if w is None:
@@ -258,10 +261,18 @@ def generate_land_report_excel(land: Land, analysis: Analysis, details: dict) ->
         cell.border = border
         cell.alignment = Alignment(horizontal="center" if col_idx in (3, 5, 6) else "left")
 
-    fac_list = details.get("nearby_facilities", {}).get("all_facilities", []) if details else []
+    fac_meta = details.get("nearby_facilities", {}) if details else {}
+    fac_list = fac_meta.get("all_facilities", []) if isinstance(fac_meta, dict) else []
+    fac_status = fac_meta.get("status") if isinstance(fac_meta, dict) else None
+
     if not fac_list:
         ws_fac.merge_cells("A5:G5")
-        ws_fac["A5"] = "No facilities recorded within the queried search radius or live GIS query was offline."
+        if fac_status == "empty":
+            ws_fac["A5"] = "No mapped facilities found within the searched radius in OpenStreetMap."
+        elif fac_status in ("unavailable", "failed"):
+            ws_fac["A5"] = "Geospatial facility proximity service was temporarily unavailable."
+        else:
+            ws_fac["A5"] = "No nearby facility records available for this parcel."
         ws_fac["A5"].font = regular_font
         ws_fac["A5"].alignment = Alignment(horizontal="center")
     else:
