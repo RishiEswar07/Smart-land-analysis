@@ -80,12 +80,20 @@ export default function History() {
             Review past land suitability assessments, factor breakdowns, and export PDF/Excel reports.
           </p>
         </div>
-        <NavLink
-          to="/building-type"
-          className="btn-primary !px-5 !py-2.5 text-sm self-start sm:self-auto shrink-0 shadow-sm"
-        >
-          + New Land Analysis
-        </NavLink>
+        <div className="flex items-center gap-2.5 self-start sm:self-auto shrink-0">
+          <NavLink
+            to="/compare"
+            className="btn-outline !px-4 !py-2.5 text-sm font-semibold flex items-center gap-1.5"
+          >
+            <span>⚖️</span> Compare Parcels
+          </NavLink>
+          <NavLink
+            to="/building-type"
+            className="btn-primary !px-5 !py-2.5 text-sm self-start sm:self-auto shrink-0 shadow-sm"
+          >
+            + New Land Analysis
+          </NavLink>
+        </div>
       </div>
 
       {/* Loading & Error States */}

@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.analysis import Analysis
 from app.models.land import Land, LandType, SoilType
 from app.services.exceptions import NotFoundError
+from app.services.building_rule_service import evaluate_building_rules
 from app.services.facility_service import fetch_nearby_facilities, haversine_distance_km
 from app.services.landcover_service import LandCoverLookupError, get_land_cover
 from app.services.soil_service import fetch_soilgrids_data
@@ -1030,6 +1031,12 @@ def build_detailed_analysis_dict(land: Land, analysis: Analysis) -> dict:
             "building_type": btype,
             "ai_explanation": analysis.ai_explanation,
         },
+        "building_planning_rules": evaluate_building_rules(
+            area_sqft=land.area_sqft,
+            road_width_ft=land.road_width,
+            building_type=btype,
+            boundary_geojson=land.boundary_geojson,
+        ),
         "disclaimer": "This analysis is a GIS-based decision-support assessment. It does not constitute government approval, legal clearance, land-title verification, environmental clearance, or structural engineering certification.",
     }
 

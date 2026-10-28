@@ -13,6 +13,7 @@ import History from './pages/History'
 import Dashboard from './pages/Dashboard'
 import Reports from './pages/Reports'
 import About from './pages/About'
+import CompareParcels from './pages/CompareParcels'
 import { pingBackend } from './services/api'
 
 export default function App() {
@@ -37,6 +38,7 @@ export default function App() {
             <Route path="/building-type" element={<BuildingTypeSelection />} />
             <Route path="/land-analysis" element={<LandAnalysis />} />
             <Route path="/history" element={<History />} />
+            <Route path="/compare" element={<CompareParcels />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/reports" element={<Reports />} />
           </Route>

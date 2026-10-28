@@ -5,6 +5,7 @@ import landService from '../services/landService'
 import gisService from '../services/gisService'
 import ScoreGauge from './ScoreGauge'
 import Loader from './Loader'
+import BuildingPlanningRulesCard from './BuildingPlanningRulesCard'
 
 /**
  * DetailedModalErrorBoundary
@@ -519,6 +520,13 @@ function DetailedLandAnalysisModalContent({
                   </p>
                 </div>
               </div>
+
+              {/* Section 1.8: TNCDBR 2019 Building Planning Rules & FSI Engine */}
+              {data?.building_planning_rules && (
+                <div className="w-full">
+                  <BuildingPlanningRulesCard rules={data.building_planning_rules} />
+                </div>
+              )}
 
               {/* Section 2: Factor Breakdown with "Why this score?" physical explanations */}
               <div>

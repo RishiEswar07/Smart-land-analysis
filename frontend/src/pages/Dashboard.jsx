@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts'
 import StatCard from '../components/StatCard'
 import ScoreGauge from '../components/ScoreGauge'
@@ -57,10 +58,18 @@ export default function Dashboard() {
 
   return (
     <div className="max-w-7xl mx-auto px-5 sm:px-8 py-12">
-      <div className="mb-8">
-        <span className="label-eyebrow">Dashboard</span>
-        <h1 className="mt-3 text-2xl sm:text-3xl font-display font-bold text-ink">Your analysis overview</h1>
-        <p className="text-slate text-sm mt-2">A snapshot of every land you've analyzed so far.</p>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
+        <div>
+          <span className="label-eyebrow">Dashboard</span>
+          <h1 className="mt-3 text-2xl sm:text-3xl font-display font-bold text-ink">Your analysis overview</h1>
+          <p className="text-slate text-sm mt-2">A snapshot of every land you've analyzed so far.</p>
+        </div>
+        <Link
+          to="/compare"
+          className="btn-outline !px-4 !py-2.5 text-sm font-semibold flex items-center gap-1.5 self-start sm:self-auto shrink-0"
+        >
+          <span>⚖️</span> Compare Parcels
+        </Link>
       </div>
 
       {/* ---------------- STAT ROW ---------------- */}
@@ -250,4 +259,3 @@ export default function Dashboard() {
     </div>
   )
 }
-

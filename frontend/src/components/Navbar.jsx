@@ -8,6 +8,7 @@ const links = [
   { to: '/building-type', label: 'Select Building' },
   { to: '/land-analysis', label: 'Land Analysis' },
   { to: '/history', label: 'History' },
+  { to: '/compare', label: 'Compare Parcels' },
   { to: '/dashboard', label: 'Dashboard' },
   { to: '/reports', label: 'Reports' },
   { to: '/about', label: 'About' },

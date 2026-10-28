@@ -16,6 +16,7 @@ calls the service layer, and maps results/errors to HTTP responses.
 """
 
 import uuid
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,8 +25,10 @@ from app.db.session import get_db
 from app.dependencies.auth import get_current_user
 from app.dependencies.pagination import PaginationParams, get_pagination_params
 from app.models.user import User
+from app.schemas.comparison import ParcelComparisonRequest, ParcelComparisonResponse
 from app.schemas.land import LandCreate, LandListResponse, LandResponse, LandUpdate
-from app.services import land_service
+from app.services import comparison_service, land_service
+from app.services.building_rule_service import evaluate_building_rules
 from app.services.exceptions import NotFoundError
 from app.services.facility_service import fetch_nearby_facilities
 
@@ -135,6 +138,86 @@ async def search_nearby_facilities(
         **data,
         **data.get("categories", {}),
     }
+
+
+@router.get(
+    "/planning-rules/calculate",
+    status_code=status.HTTP_200_OK,
+    summary="Interactive preview of TNCDBR 2019 FSI, setbacks, and building planning rules",
+)
+async def calculate_planning_rules_preview(
+    area_sqft: float = Query(..., gt=0, description="Plot area in square feet"),
+    road_width_ft: float = Query(..., gt=0, description="Abutting road right-of-way width in feet"),
+    building_type: Optional[str] = Query("Individual House", description="Target building occupancy type"),
+    plot_width_ft: Optional[float] = Query(None, gt=0, description="Optional plot frontage / width in feet"),
+    plot_depth_ft: Optional[float] = Query(None, gt=0, description="Optional plot depth in feet"),
+):
+    """Calculates preliminary TNCDBR 2019 planning parameters without requiring a saved parcel."""
+    return evaluate_building_rules(
+        area_sqft=area_sqft,
+        road_width_ft=road_width_ft,
+        building_type=building_type,
+        plot_width_ft=plot_width_ft,
+        plot_depth_ft=plot_depth_ft,
+    )
+
+
+@router.post(
+    "/compare",
+    response_model=ParcelComparisonResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Multi-parcel side-by-side comparison and building-specific ranking",
+)
+async def compare_parcels(
+    payload: ParcelComparisonRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ParcelComparisonResponse:
+    """
+    Compares 2 or 3 parcels owned by the authenticated user across suitability, risk,
+    road access, and TNCDBR 2019 statutory building planning rules.
+    """
+    try:
+        return await comparison_service.compare_parcels(
+            db=db,
+            user_id=current_user.id,
+            parcel_ids=payload.parcel_ids,
+            target_building_type=payload.building_type or "Individual House",
+        )
+    except NotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
+
+@router.get(
+    "/{land_id}/planning-rules",
+    status_code=status.HTTP_200_OK,
+    summary="Get TNCDBR 2019 FSI, setbacks, and building planning rules for a land parcel",
+)
+async def get_land_planning_rules(
+    land_id: uuid.UUID,
+    building_type: Optional[str] = Query(None, description="Target building occupancy type"),
+    plot_width_ft: Optional[float] = Query(None, gt=0, description="Optional plot frontage in feet"),
+    plot_depth_ft: Optional[float] = Query(None, gt=0, description="Optional plot depth in feet"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Fetches and evaluates TNCDBR 2019 planning rules strictly for a parcel owned by the logged-in user."""
+    try:
+        land = await land_service.get_land(db, land_id, user_id=current_user.id)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    target_btype = building_type or "Individual House"
+    return evaluate_building_rules(
+        area_sqft=land.area_sqft,
+        road_width_ft=land.road_width,
+        building_type=target_btype,
+        plot_width_ft=plot_width_ft,
+        plot_depth_ft=plot_depth_ft,
+        boundary_geojson=land.boundary_geojson,
+    )
 
 
 @router.put(

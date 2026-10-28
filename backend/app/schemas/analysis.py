@@ -10,7 +10,7 @@ contract both sides were already built against.
 
 import uuid
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -103,6 +103,7 @@ class DetailedAnalysisResponse(BaseModel):
     data_sources: list[ProvenanceItem]
     historical_change: dict
     recommendation: dict
+    building_planning_rules: Optional[dict] = Field(default=None, description="TNCDBR 2019 regulatory building rules, FSI, and setbacks")
     disclaimer: str
 
     model_config = ConfigDict(from_attributes=True, extra="ignore")

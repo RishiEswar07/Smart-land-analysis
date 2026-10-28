@@ -22,6 +22,7 @@ import Loader from '../components/Loader'
 import ErrorState from '../components/ErrorState'
 import House3DModel from '../components/House3DModel'
 import DetailedLandAnalysisModal from '../components/DetailedLandAnalysisModal'
+import BuildingPlanningRulesCard from '../components/BuildingPlanningRulesCard'
 import useGeolocation from '../hooks/useGeolocation'
 import landService from '../services/landService'
 import analysisService from '../services/analysisService'
@@ -129,6 +130,7 @@ export default function LandAnalysis() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState(null)
   const [result, setResult] = useState(savedState?.result || null)
+  const [planningRules, setPlanningRules] = useState(savedState?.planningRules || null)
   const [showDetailedModal, setShowDetailedModal] = useState(false)
 
   // Non-blocking background ping on mount to wake Render container
@@ -250,13 +252,14 @@ export default function LandAnalysis() {
         directAreaUnit,
         gisData,
         manualArea,
-        result
+        result,
+        planningRules
       };
       sessionStorage.setItem(STORAGE_KEY, JSON.stringify(stateToSave));
     } catch (e) {
       console.warn("Failed to persist analysis state:", e);
     }
-  }, [step, selectedBuildingType, clickedLocation, activeBoundary, areaInputMode, directAreaValue, directAreaUnit, gisData, manualArea, result]);
+  }, [step, selectedBuildingType, clickedLocation, activeBoundary, areaInputMode, directAreaValue, directAreaUnit, gisData, manualArea, result, planningRules]);
 
   const handleMapClick = (loc) => {
     setClickedLocation(loc)
@@ -265,6 +268,20 @@ export default function LandAnalysis() {
     }
     setError(null)
   }
+
+  // Auto-calculate planning rules preview if not fetched during prediction
+  useEffect(() => {
+    if (step === 'result' && !planningRules) {
+      const area = currentCalculatedSqFt || gisData?.area_sqft || (manualArea ? parseFloat(manualArea) : 0) || 0
+      const road = gisData?.road_width || (result?.road_width ? parseFloat(result.road_width) : null)
+      if (area > 0 && road > 0) {
+        landService
+          .calculatePlanningRulesPreview(area, road, selectedBuildingType)
+          .then((res) => setPlanningRules(res))
+          .catch((err) => console.warn('Planning rules preview calculation notice:', err))
+      }
+    }
+  }, [step, planningRules, currentCalculatedSqFt, gisData, manualArea, result, selectedBuildingType])
 
   const handleManualBoundary = (boundary) => {
     setActiveBoundary(boundary)
@@ -433,6 +450,13 @@ export default function LandAnalysis() {
       })
 
       const analysis = await analysisService.predict(land.id)
+      let rules = null
+      try {
+        rules = await landService.getPlanningRules(land.id, selectedBuildingType)
+      } catch (ruleErr) {
+        console.warn("Could not fetch planning rules:", ruleErr)
+      }
+      setPlanningRules(rules)
       setResult(analysis)
       setStep('result')
     } catch (err) {
@@ -453,6 +477,7 @@ export default function LandAnalysis() {
     setActiveBoundary(null)
     setSearchTarget(null)
     setResult(null)
+    setPlanningRules(null)
     setError(null)
     setManualArea('')
     setDirectAreaValue('')
@@ -1193,6 +1218,13 @@ export default function LandAnalysis() {
                 </div>
               </div>
 
+              {/* TNCDBR 2019 Building Planning Rules & Regulatory Compliance Section */}
+              {planningRules && (
+                <div className="mt-8">
+                  <BuildingPlanningRulesCard rules={planningRules} />
+                </div>
+              )}
+
               {/* Procedural 3D Generator */}
               <div className="mt-10">
                 <div className="flex justify-between items-end mb-4">
@@ -1243,7 +1275,8 @@ export default function LandAnalysis() {
                 onClose={() => setShowDetailedModal(false)}
                 analysisId={result?.id}
                 initialData={
-                  result
+                  result,
+        planningRules
                     ? {
                         id: result.id,
                         land_id: result.land_id,
