@@ -664,7 +664,7 @@ export default function LandAnalysis() {
               onPolygonChange={handleManualBoundary}
               flyToCenter={searchTarget}
               drawable={areaInputMode === 'polygon'}
-              height="580px"
+              height="640px"
             />
           </div>
 

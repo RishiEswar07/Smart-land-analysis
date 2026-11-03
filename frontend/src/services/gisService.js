@@ -5,7 +5,7 @@ import centroid from '@turf/centroid';
 const OVERPASS_API = 'https://overpass-api.de/api/interpreter';
 const SOILGRIDS_API = 'https://rest.isric.org/soilgrids/v2.0/classification/query';
 
-import api from './api';
+import api from './api.js';
 
 // Mapping WRB Soil classes and keywords to our project types
 export const mapSoilType = (wrbClassName) => {
@@ -143,6 +143,94 @@ export const validatePlotSize = (buildingType, areaSqFt) => {
  */
 export const calculatePolygonAreaSqFt = (coords) => {
   return calculateGeodesicArea(coords).sqFt;
+};
+
+/**
+ * Calculates the total perimeter of a polygon in feet and meters.
+ */
+export const calculatePolygonPerimeter = (coords) => {
+  if (!coords || coords.length < 2) {
+    return { meters: 0, feet: 0 };
+  }
+  const rad = Math.PI / 180;
+  const R = 6378137; // Earth radius in meters
+  let totalDistanceMeters = 0;
+  const n = coords.length;
+  for (let i = 0; i < n; i++) {
+    const p1 = coords[i];
+    const p2 = coords[(i + 1) % n];
+    const lat1 = (p1.lat ?? p1[1]) * rad;
+    const lat2 = (p2.lat ?? p2[1]) * rad;
+    const dLat = lat2 - lat1;
+    const dLng = ((p2.lng ?? p2[0]) - (p1.lng ?? p1[0])) * rad;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    totalDistanceMeters += R * c;
+  }
+  const feet = totalDistanceMeters * 3.28084;
+  return {
+    meters: Math.round(totalDistanceMeters * 10) / 10,
+    feet: Math.round(feet * 10) / 10,
+  };
+};
+
+/**
+ * Checks if a 2D line segment (p1-p2) intersects with (p3-p4).
+ */
+function lineSegmentsIntersect(p1, p2, p3, p4) {
+  const ccw = (A, B, C) => (C.lat - A.lat) * (B.lng - A.lng) > (B.lat - A.lat) * (C.lng - A.lng);
+  return (
+    ccw(p1, p3, p4) !== ccw(p2, p3, p4) &&
+    ccw(p1, p2, p3) !== ccw(p1, p2, p4)
+  );
+}
+
+/**
+ * Validates a polygon boundary for:
+ * 1. Minimum 3 points
+ * 2. Self-intersections (bow-tie or complex polygon)
+ * 3. Minimum non-zero area
+ */
+export const validatePolygonGeometry = (coords) => {
+  if (!coords || coords.length < 3) {
+    return {
+      isValid: false,
+      reason: 'A polygon requires at least 3 points to form a closed shape.',
+    };
+  }
+
+  // Check self-intersections among non-adjacent edges
+  const n = coords.length;
+  for (let i = 0; i < n; i++) {
+    const a1 = coords[i];
+    const a2 = coords[(i + 1) % n];
+    for (let j = i + 1; j < n; j++) {
+      if (Math.abs(i - j) <= 1 || (i === 0 && j === n - 1)) continue;
+      const b1 = coords[j];
+      const b2 = coords[(j + 1) % n];
+      if (lineSegmentsIntersect(a1, a2, b1, b2)) {
+        return {
+          isValid: false,
+          reason: 'Polygon lines cross over each other (self-intersecting). Please redraw or adjust the vertices.',
+        };
+      }
+    }
+  }
+
+  const { sqFt } = calculateGeodesicArea(coords);
+  if (!sqFt || sqFt <= 5) {
+    return {
+      isValid: false,
+      reason: 'Enclosed polygon area is too small to be a valid land parcel.',
+    };
+  }
+
+  return {
+    isValid: true,
+    reason: null,
+  };
 };
 
 const gisService = {
