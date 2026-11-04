@@ -120,8 +120,8 @@ export default function CompareParcels() {
       ['Overall Risk Score (%)', ...parcels.map((p) => p.overall_risk_score ?? 'N/A')],
       ['Flood Risk Level', ...parcels.map((p) => p.flood_risk_level ?? 'N/A')],
       ['Soil Type', ...parcels.map((p) => p.soil_type || 'N/A')],
-      ['Water Connection', ...parcels.map((p) => (p.water_availability ? 'Yes' : 'No'))],
-      ['Electricity Connection', ...parcels.map((p) => (p.electricity_availability ? 'Yes' : 'No'))],
+      ['Water Connection', ...parcels.map((p) => (p.water_availability === true ? 'Available' : p.water_availability === false ? 'Not Available' : 'Data Not Available'))],
+      ['Electricity Connection', ...parcels.map((p) => (p.electricity_availability === true ? 'Available' : p.electricity_availability === false ? 'Not Available' : 'Data Not Available'))],
       ['TNCDBR Base FSI', ...parcels.map((p) => p.planning_rules?.base_fsi || 'N/A')],
       ['Max Gross Floor Area (sq.ft)', ...parcels.map((p) => p.planning_rules?.theoretical_max_floor_area_sqft || 'N/A')],
       ['Front Setback (ft)', ...parcels.map((p) => p.planning_rules?.front_setback_ft?.toFixed(1) || 'N/A')],
@@ -316,7 +316,7 @@ export default function CompareParcels() {
                     <div>
                       <span className="text-[10px] text-slate-400 block">Road Width</span>
                       <span className="font-semibold text-ink">
-                        {land.road_width ? `${land.road_width} ft` : 'Unspecified'}
+                        {land.road_width ? `${land.road_width} ft (${(land.road_width * 0.3048).toFixed(1)} m)` : 'Width data unavailable'}
                       </span>
                     </div>
                   </div>
@@ -705,7 +705,7 @@ export default function CompareParcels() {
                     <td className="py-2.5 px-4 font-medium text-slate-600">Abutting Road Width</td>
                     {comparisonData.parcels.map((p) => (
                       <td key={p.land_id} className="py-2.5 px-4 font-semibold text-ink">
-                        {p.road_width_ft ? `${p.road_width_ft} ft` : 'Unspecified'}
+                        {p.road_width_ft ? `${p.road_width_ft} ft (${(p.road_width_ft * 0.3048).toFixed(1)} m)` : 'Width data unavailable'}
                       </td>
                     ))}
                   </tr>
@@ -734,11 +734,13 @@ export default function CompareParcels() {
                     <td className="py-2.5 px-4 font-medium text-slate-600">Utilities (Water & Power)</td>
                     {comparisonData.parcels.map((p) => (
                       <td key={p.land_id} className="py-2.5 px-4 text-slate-800">
-                        {p.water_availability && p.electricity_availability
+                        {p.water_availability === true && p.electricity_availability === true
                           ? '✅ Water & Power Available'
-                          : p.water_availability || p.electricity_availability
+                          : p.water_availability === true || p.electricity_availability === true
                           ? '⚠️ Partial Utility Availability'
-                          : '❌ Unconfirmed Utilities'}
+                          : p.water_availability === false && p.electricity_availability === false
+                          ? '❌ Utilities Not Available'
+                          : 'ℹ️ Utility Data Not Available'}
                       </td>
                     ))}
                   </tr>

@@ -6,6 +6,175 @@ const OVERPASS_API = 'https://overpass-api.de/api/interpreter';
 const SOILGRIDS_API = 'https://rest.isric.org/soilgrids/v2.0/classification/query';
 
 import api from './api.js';
+import landService from './landService.js';
+
+// Highway classification labels ONLY - no fixed width fabrication!
+export const ROAD_LABEL_MAP = {
+  motorway: 'Motorway / Expressway',
+  motorway_link: 'Motorway Ramp / Link',
+  trunk: 'National Highway / Trunk',
+  trunk_link: 'Trunk Ramp / Link',
+  primary: 'State Highway / Primary Arterial',
+  primary_link: 'Primary Arterial Link',
+  secondary: 'Major District Road / Secondary',
+  secondary_link: 'Secondary Road Link',
+  tertiary: 'Minor District Road / Collector',
+  tertiary_link: 'Collector Link',
+  residential: 'Residential Street',
+  living_street: 'Living Street',
+  unclassified: 'Unclassified Rural / Local Road',
+  service: 'Local Service Road / Access Lane',
+  track: 'Agricultural Cart Track',
+};
+
+// Backward-compatible alias
+export const ROAD_HIERARCHY_MAP = ROAD_LABEL_MAP;
+
+/**
+ * Calculates Euclidean distance in meters from point P to line segment AB using local projection.
+ */
+export const distancePointToSegmentMeters = (pLat, pLng, aLat, aLng, bLat, bLng) => {
+  const meanLatRad = ((pLat + aLat + bLat) / 3.0) * (Math.PI / 180.0);
+  const kx = Math.cos(meanLatRad) * 111320.0;
+  const ky = 110540.0;
+
+  const px = pLng * kx, py = pLat * ky;
+  const ax = aLng * kx, ay = aLat * ky;
+  const bx = bLng * kx, by = bLat * ky;
+
+  const dx = bx - ax;
+  const dy = by - ay;
+  const lenSq = dx * dx + dy * dy;
+
+  if (lenSq === 0.0) {
+    return Math.hypot(px - ax, py - ay);
+  }
+
+  const t = Math.max(0.0, Math.min(1.0, ((px - ax) * dx + (py - ay) * dy) / lenSq));
+  const projX = ax + t * dx;
+  const projY = ay + t * dy;
+
+  return Math.hypot(px - projX, py - projY);
+};
+
+/**
+ * Evaluates road width with strict separation:
+ * - Tagged Road Width: Actual measured OSM tag
+ * - Estimated Carriageway Width: Lane-derived estimate (strictly labeled as carriageway only)
+ * - Highway classification alone NEVER assigns a fixed road width.
+ * - If verified width is unavailable, shows 'Manual road-width verification required'.
+ */
+export const parseRoadWidthPriority = (tags = {}) => {
+  let taggedWFt = null;
+  let taggedWM = null;
+  let hasTagged = false;
+  let taggedSource = null;
+
+  let estCwayFt = null;
+  let estCwayM = null;
+  let hasEstCway = false;
+  let cwayBasis = null;
+
+  // 1. Tagged road width
+  const rawWidth = tags.width || tags['width:carriageway'] || tags.est_width;
+  if (rawWidth) {
+    const clean = String(rawWidth).trim().toLowerCase();
+    const isFeet = clean.includes('ft') || clean.includes("'") || clean.includes('feet');
+    const match = clean.match(/([0-9]+(?:\.[0-9]+)?)/);
+    if (match) {
+      const val = parseFloat(match[1]);
+      if (!isNaN(val) && val > 0) {
+        if (isFeet || val > 35.0) {
+          taggedWFt = Math.round(val * 10) / 10;
+          taggedWM = Math.round(taggedWFt * 0.3048 * 100) / 100;
+        } else {
+          taggedWM = Math.round(val * 100) / 100;
+          taggedWFt = Math.round(taggedWM * 3.28084 * 10) / 10;
+        }
+        hasTagged = true;
+        taggedSource = `OSM Measured Tag (width: ${rawWidth})`;
+      }
+    }
+  }
+
+  // 2. Estimated Carriageway Width from lanes (strictly labeled as carriageway)
+  const rawLanes = tags.lanes;
+  if (rawLanes) {
+    const lanes = parseInt(String(rawLanes).trim(), 10);
+    if (!isNaN(lanes) && lanes > 0) {
+      estCwayM = Math.round(lanes * 3.5 * 10) / 10;
+      estCwayFt = Math.round(estCwayM * 3.28084 * 10) / 10;
+      hasEstCway = true;
+      cwayBasis = `${lanes} lanes @ 3.5m/lane (IRC 73/86 carriageway standard)`;
+    }
+  }
+
+  if (hasTagged) {
+    return {
+      tagged_road_width_ft: taggedWFt,
+      tagged_road_width_m: taggedWM,
+      has_tagged_width: true,
+      estimated_carriageway_width_ft: estCwayFt,
+      estimated_carriageway_width_m: estCwayM,
+      has_estimated_carriageway: hasEstCway,
+      carriageway_calculation_basis: cwayBasis,
+      verified_road_width_ft: taggedWFt,
+      verified_road_width_m: taggedWM,
+      road_width_ft: taggedWFt,
+      road_width_m: taggedWM,
+      is_road_width_estimated: false,
+      width_status: 'Verified Tagged Width',
+      verification_requirement: 'Verified via OSM Measured Tag',
+      tncdbr_eligibility: 'Eligible for TNCDBR statutory evaluation with verified width',
+      confidence: 'VERIFIED (OSM Measured Tag)',
+      data_source: taggedSource || 'OpenStreetMap Tagged Width',
+    };
+  }
+
+  if (hasEstCway) {
+    return {
+      tagged_road_width_ft: null,
+      tagged_road_width_m: null,
+      has_tagged_width: false,
+      estimated_carriageway_width_ft: estCwayFt,
+      estimated_carriageway_width_m: estCwayM,
+      has_estimated_carriageway: true,
+      carriageway_calculation_basis: cwayBasis,
+      verified_road_width_ft: null,
+      verified_road_width_m: null,
+      road_width_ft: null,
+      road_width_m: null,
+      is_road_width_estimated: true,
+      width_status: 'Estimated Carriageway Only (Road width data unavailable)',
+      verification_requirement: 'Manual road-width verification required',
+      tncdbr_eligibility: 'Manual road-width verification required (Estimated carriageway cannot be used for TNCDBR compliance)',
+      confidence: 'ESTIMATED CARRIAGEWAY ONLY',
+      data_source: `Estimated Carriageway Width: ${cwayBasis}`,
+    };
+  }
+
+  const hw = (tags.highway || 'unclassified').toLowerCase().trim();
+  const label = ROAD_LABEL_MAP[hw] || hw.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
+  return {
+    tagged_road_width_ft: null,
+    tagged_road_width_m: null,
+    has_tagged_width: false,
+    estimated_carriageway_width_ft: null,
+    estimated_carriageway_width_m: null,
+    has_estimated_carriageway: false,
+    carriageway_calculation_basis: null,
+    verified_road_width_ft: null,
+    verified_road_width_m: null,
+    road_width_ft: null,
+    road_width_m: null,
+    is_road_width_estimated: false,
+    width_status: 'Road width data unavailable',
+    verification_requirement: 'Manual road-width verification required',
+    tncdbr_eligibility: 'Manual road-width verification required (No verified road width data available)',
+    confidence: 'UNAVAILABLE',
+    data_source: `OSM Road Network (${label}) - Width data unavailable`,
+  };
+};
 
 // Mapping WRB Soil classes and keywords to our project types
 export const mapSoilType = (wrbClassName) => {
@@ -306,13 +475,176 @@ const gisService = {
   },
 
   /**
-   * Fetch nearby infrastructure (water, elec, road width)
+   * Identifies genuine nearest accessible road to parcel using backend road service
+   * with high-reliability browser fallback (Nominatim + OSM Way API).
    */
-  async fetchInfrastructure(lat, lng) {
+  async fetchNearestRoad(lat, lng, boundaryCoords = null) {
+    // 1. Try backend dedicated road detection endpoint first
+    try {
+      const backendRes = await landService.detectRoadAccess(lat, lng);
+      if (backendRes && backendRes.available !== undefined) {
+        return backendRes;
+      }
+    } catch (e) {
+      console.warn('Backend road detection call failed, attempting browser fallback:', e?.message);
+    }
+
+    // 2. Direct browser fallback via Nominatim Reverse Geocoding
+    try {
+      const headers = { Accept: 'application/json' };
+      const revUrl = `https://nominatim.openstreetmap.org/reverse?lat=${Number(lat).toFixed(6)}&lon=${Number(lng).toFixed(6)}&format=json&zoom=18&addressdetails=1`;
+      const nomResp = await axios.get(revUrl, { headers, timeout: 5000 });
+      const nomData = nomResp.data || {};
+
+      const refPoints = [{ lat: Number(lat), lng: Number(lng) }];
+      if (Array.isArray(boundaryCoords) && boundaryCoords.length >= 3) {
+        boundaryCoords.forEach(c => {
+          const cLat = c.lat ?? c[1];
+          const cLng = c.lng ?? c[0];
+          if (cLat != null && cLng != null) refPoints.push({ lat: Number(cLat), lng: Number(cLng) });
+        });
+      }
+
+      const osmId = nomData.osm_id;
+      const osmType = nomData.osm_type;
+      const osmClass = nomData.class;
+      const roadTag = nomData.address?.road;
+
+      if (osmType === 'way' && osmId && osmClass === 'highway') {
+        const wayUrl = `https://api.openstreetmap.org/api/0.6/way/${osmId}/full.json`;
+        const wResp = await axios.get(wayUrl, { headers, timeout: 5000 });
+        const elements = wResp.data?.elements || [];
+        const nodes = elements.filter(el => el.type === 'node');
+        const ways = elements.filter(el => el.type === 'way');
+        const wayTags = ways[0]?.tags || {};
+
+        let minDist = 9999;
+        if (nodes.length >= 2) {
+          refPoints.forEach(p => {
+            for (let i = 0; i < nodes.length - 1; i++) {
+              const d = distancePointToSegmentMeters(p.lat, p.lng, nodes[i].lat, nodes[i].lon, nodes[i + 1].lat, nodes[i + 1].lon);
+              if (d < minDist) minDist = d;
+            }
+          });
+        }
+
+        if (minDist <= 80.0) {
+          const hw = (wayTags.highway || nomData.type || 'residential').toLowerCase();
+          const widthInfo = parseRoadWidthPriority(wayTags);
+          const typeDisplay = ROAD_HIERARCHY_MAP[hw]?.label || hw.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
+          const roadNameDisplay = wayTags.name || roadTag || `Unnamed ${typeDisplay}`;
+          const distM = Math.round(minDist * 10) / 10;
+          const distDisplay = distM > 0 ? `${distM} m from parcel boundary` : 'Directly abutting parcel';
+
+          return {
+            available: true,
+            road_name: roadNameDisplay,
+            road_type: hw,
+            road_type_display: typeDisplay,
+            tagged_road_width_ft: widthInfo.tagged_road_width_ft,
+            tagged_road_width_m: widthInfo.tagged_road_width_m,
+            has_tagged_width: widthInfo.has_tagged_width,
+            estimated_carriageway_width_ft: widthInfo.estimated_carriageway_width_ft,
+            estimated_carriageway_width_m: widthInfo.estimated_carriageway_width_m,
+            has_estimated_carriageway: widthInfo.has_estimated_carriageway,
+            carriageway_calculation_basis: widthInfo.carriageway_calculation_basis,
+            verified_road_width_ft: widthInfo.verified_road_width_ft,
+            verified_road_width_m: widthInfo.verified_road_width_m,
+            road_width_ft: widthInfo.road_width_ft,
+            road_width_m: widthInfo.road_width_m,
+            distance_meters: distM,
+            distance_display: distDisplay,
+            is_road_width_estimated: widthInfo.is_road_width_estimated,
+            width_status: widthInfo.width_status,
+            verification_requirement: widthInfo.verification_requirement,
+            tncdbr_eligibility: widthInfo.tncdbr_eligibility,
+            confidence: widthInfo.confidence,
+            data_source: widthInfo.data_source,
+            lanes: wayTags.lanes ? parseInt(wayTags.lanes, 10) : null,
+            maxspeed: wayTags.maxspeed || null,
+            surface: wayTags.surface || null,
+            osm_id: osmId,
+          };
+        }
+      }
+
+      if (roadTag) {
+        return {
+          available: true,
+          road_name: roadTag,
+          road_type: 'residential',
+          road_type_display: 'Residential Street / Colony Access',
+          tagged_road_width_ft: null,
+          tagged_road_width_m: null,
+          has_tagged_width: false,
+          estimated_carriageway_width_ft: null,
+          estimated_carriageway_width_m: null,
+          has_estimated_carriageway: false,
+          carriageway_calculation_basis: null,
+          verified_road_width_ft: null,
+          verified_road_width_m: null,
+          road_width_ft: null,
+          road_width_m: null,
+          distance_meters: 10.0,
+          distance_display: 'Abutting parcel address frontage',
+          is_road_width_estimated: false,
+          width_status: 'Road width data unavailable',
+          verification_requirement: 'Manual road-width verification required',
+          tncdbr_eligibility: 'Manual road-width verification required (No verified road width data available)',
+          confidence: 'UNAVAILABLE',
+          data_source: 'Nominatim Frontage Record - Width data unavailable',
+          lanes: null,
+          maxspeed: null,
+          surface: null,
+          osm_id: osmId || null,
+        };
+      }
+    } catch (e) {
+      console.warn('Browser direct road lookup error:', e?.message);
+    }
+
+    return {
+      available: false,
+      road_name: 'No accessible road within 50 m',
+      road_type: 'unmapped',
+      road_type_display: 'No Abutting Road Mapped',
+      tagged_road_width_ft: null,
+      tagged_road_width_m: null,
+      has_tagged_width: false,
+      estimated_carriageway_width_ft: null,
+      estimated_carriageway_width_m: null,
+      has_estimated_carriageway: false,
+      carriageway_calculation_basis: null,
+      verified_road_width_ft: null,
+      verified_road_width_m: null,
+      road_width_ft: null,
+      road_width_m: null,
+      distance_meters: null,
+      distance_display: 'No accessible road within 50 m (Manual road-width verification required)',
+      is_road_width_estimated: false,
+      width_status: 'Road width data unavailable',
+      verification_requirement: 'Manual road-width verification required',
+      tncdbr_eligibility: 'Manual road-width verification required (No abutting accessible road mapped)',
+      confidence: 'UNAVAILABLE',
+      data_source: 'Width data unavailable (No accessible road within 50m)',
+      lanes: null,
+      maxspeed: null,
+      surface: null,
+      osm_id: null,
+    };
+  },
+
+  /**
+   * Fetch nearby infrastructure (road width, natural water bodies, and utilities)
+   */
+  async fetchInfrastructure(lat, lng, boundaryCoords = null) {
+    // 1. Fetch genuine nearest abutting road with geometric distance & 4-tier width
+    const roadData = await this.fetchNearestRoad(lat, lng, boundaryCoords);
+
+    // 2. Fetch natural water bodies & utilities via Overpass
     const query = `
       [out:json][timeout:5];
       (
-        way["highway"](around:50, ${lat}, ${lng});
         node["power"](around:2000, ${lat}, ${lng});
         way["power"](around:2000, ${lat}, ${lng});
         node["amenity"~"drinking_water|water_point"](around:2000, ${lat}, ${lng});
@@ -326,6 +658,8 @@ const gisService = {
       'https://lz4.overpass-api.de/api/interpreter',
       'https://overpass.kumi.systems/api/interpreter'
     ];
+
+    const detectedWaterBodies = [];
 
     try {
       let elements = [];
@@ -341,53 +675,60 @@ const gisService = {
         }
       }
 
-      let hasWater = false;
-      let hasElec = false;
-      let roadWidth = null;
-      let isRoadWidthEstimated = false;
-
       elements.forEach(e => {
         const tags = e.tags || {};
-        if (tags.power) hasElec = true;
-        if (tags.waterway || tags.amenity === 'drinking_water' || tags.amenity === 'water_point') hasWater = true;
-        
-        if (tags.highway && roadWidth === null) {
-          // Check explicit OSM width tags first
-          const rawW = tags.width || tags.est_width || tags['width:carriageway'];
-          if (rawW) {
-            const parsed = parseFloat(rawW);
-            if (!isNaN(parsed) && parsed > 0) {
-              const isFeet = String(rawW).toLowerCase().includes('ft') || parsed > 35;
-              roadWidth = isFeet ? Math.round(parsed) : Math.round(parsed * 3.28084);
-              isRoadWidthEstimated = false;
-            }
+        if (tags.waterway) {
+          const wName = tags.name || `${tags.waterway.charAt(0).toUpperCase() + tags.waterway.slice(1)} channel`;
+          if (!detectedWaterBodies.includes(wName)) {
+            detectedWaterBodies.push(wName);
           }
-
-          if (roadWidth === null) {
-            // Evaluated standard corridor width based on highway classification
-            const hw = tags.highway;
-            if (hw === 'motorway' || hw === 'trunk') roadWidth = 60;
-            else if (hw === 'primary') roadWidth = 50;
-            else if (hw === 'secondary') roadWidth = 40;
-            else if (hw === 'tertiary') roadWidth = 30;
-            else if (hw === 'residential' || hw === 'living_street') roadWidth = 24;
-            else if (hw === 'service' || hw === 'track') roadWidth = 15;
-            isRoadWidthEstimated = true;
+        } else if (tags.amenity === 'drinking_water' || tags.amenity === 'water_point') {
+          const ptName = tags.name || 'Public water point / standpost';
+          if (!detectedWaterBodies.includes(ptName)) {
+            detectedWaterBodies.push(ptName);
           }
         }
       });
-
-      return {
-        available: true,
-        water: hasWater,
-        electricity: hasElec,
-        roadWidth: roadWidth,
-        isRoadWidthEstimated: isRoadWidthEstimated,
-      };
-    } catch (error) {
-      console.error('Overpass infrastructure fetch error:', error);
-      return { available: false };
+    } catch (e) {
+      console.warn('Water bodies lookup error:', e?.message);
     }
+
+    const waterBodiesSummary = detectedWaterBodies.length > 0
+      ? `${detectedWaterBodies.length} detected within 2 km (${detectedWaterBodies.slice(0, 2).join(', ')}${detectedWaterBodies.length > 2 ? '…' : ''})`
+      : 'No open water bodies mapped within 2 km';
+
+    return {
+      available: true,
+      water_availability: null,
+      electricity_availability: null,
+      water_bodies: detectedWaterBodies,
+      water_bodies_summary: waterBodiesSummary,
+      // Separated road access properties
+      taggedRoadWidthFt: roadData.tagged_road_width_ft,
+      taggedRoadWidthM: roadData.tagged_road_width_m,
+      hasTaggedWidth: roadData.has_tagged_width,
+      estimatedCarriagewayWidthFt: roadData.estimated_carriageway_width_ft,
+      estimatedCarriagewayWidthM: roadData.estimated_carriageway_width_m,
+      hasEstimatedCarriageway: roadData.has_estimated_carriageway,
+      carriagewayCalculationBasis: roadData.carriageway_calculation_basis,
+      verifiedRoadWidthFt: roadData.verified_road_width_ft,
+      verifiedRoadWidthM: roadData.verified_road_width_m,
+      roadWidth: roadData.verified_road_width_ft, // Verified only, null if missing/estimated
+      roadWidthFt: roadData.verified_road_width_ft,
+      roadWidthM: roadData.verified_road_width_m,
+      widthStatus: roadData.width_status,
+      verificationRequirement: roadData.verification_requirement,
+      tncdbrEligibility: roadData.tncdbr_eligibility,
+      roadName: roadData.road_name,
+      roadType: roadData.road_type,
+      roadTypeDisplay: roadData.road_type_display,
+      distanceMeters: roadData.distance_meters,
+      distanceDisplay: roadData.distance_display,
+      isRoadWidthEstimated: roadData.is_road_width_estimated,
+      confidence: roadData.confidence,
+      dataSource: roadData.data_source,
+      roadDetails: roadData,
+    };
   },
 
   /**

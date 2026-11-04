@@ -6,17 +6,24 @@ with automated multi-mirror failover and high-reliability OpenStreetMap
 Nominatim viewbox fallback.
 
 Computes accurate geodesic (Haversine) straight-line distances in kilometres
-(km) from the parcel centroid or selected GPS coordinates.
+(km) and meters from the parcel centroid or selected GPS coordinates.
 
-Mandatory categories covered:
-1. Bus Stand / Bus Station
-2. Airport / Aviation
-3. Railway Station
-4. Hospital & Healthcare
-5. School & College
-6. Shopping & Commercial
-7. Main Roads & Highways
-8. Water Bodies & Hydrology
+14 Mandatory Categories Covered:
+1. Hospitals
+2. Clinics
+3. Pharmacies
+4. Schools
+5. Colleges and Universities
+6. Police Stations
+7. Fire Stations
+8. Railway Stations
+9. Bus Stops
+10. ATMs and Banks
+11. Supermarkets & Retail
+12. Restaurants & Food
+13. Fuel Stations
+14. Parks & Recreation
+(Plus regional transit/aviation, main roads, and hydrology for spatial scoring)
 """
 
 import asyncio
@@ -33,6 +40,7 @@ OVERPASS_ENDPOINTS = [
     "https://overpass-api.de/api/interpreter",
     "https://lz4.overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
 ]
 
 # In-memory cache keyed by (lat_4dec, lng_4dec, radius_km)
@@ -42,6 +50,28 @@ CACHE_TTL_SECONDS = 3600  # 1 hour
 # Concurrency lock & in-flight deduplication table
 _IN_FLIGHT_REQUESTS: Dict[str, asyncio.Task] = {}
 _IN_FLIGHT_LOCK = asyncio.Lock()
+
+# Category definitions with icons and user-facing labels
+FACILITY_CATEGORY_META = {
+    "hospitals": {"label": "Hospital", "icon": "🏥"},
+    "clinics": {"label": "Clinic", "icon": "🩺"},
+    "pharmacies": {"label": "Pharmacy", "icon": "💊"},
+    "schools": {"label": "School", "icon": "🏫"},
+    "colleges": {"label": "College & University", "icon": "🎓"},
+    "police_stations": {"label": "Police Station", "icon": "👮"},
+    "fire_stations": {"label": "Fire Station", "icon": "🚒"},
+    "railway_stations": {"label": "Railway Station", "icon": "🚆"},
+    "bus_stops": {"label": "Bus Stop & Station", "icon": "🚌"},
+    "banks_atms": {"label": "Bank & ATM", "icon": "🏧"},
+    "supermarkets": {"label": "Supermarket & Retail", "icon": "🛒"},
+    "restaurants": {"label": "Restaurant & Food", "icon": "🍽️"},
+    "fuel_stations": {"label": "Fuel Station", "icon": "⛽"},
+    "parks": {"label": "Park & Garden", "icon": "🌳"},
+    # Additional spatial and infrastructure categories
+    "airports": {"label": "Airport / Aviation", "icon": "✈️"},
+    "roads": {"label": "Main Road Network", "icon": "🛣️"},
+    "water_bodies": {"label": "Hydrology / Water Body", "icon": "🌊"},
+}
 
 
 def haversine_distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -127,8 +157,9 @@ async def _query_single_nominatim_term(
 ) -> List[Dict[str, Any]]:
     """Helper to query a single term in OpenStreetMap Nominatim within viewbox with retries."""
     found: List[Dict[str, Any]] = []
-    url = f"https://nominatim.openstreetmap.org/search?q={term}&format=json&bounded=1&viewbox={viewbox}&limit=5"
-    max_allowed_dist = 50.0 if cat_key == "airports" else (radius_km * 1.5)
+    url = f"https://nominatim.openstreetmap.org/search?q={term}&format=json&bounded=1&viewbox={viewbox}&limit=8"
+    max_allowed_dist = 50.0 if cat_key == "airports" else (radius_km * 1.25)
+    meta = FACILITY_CATEGORY_META.get(cat_key, {"label": cat_label, "icon": "📍"})
 
     async with sem:
         for attempt in range(2):
@@ -146,20 +177,29 @@ async def _query_single_nominatim_term(
                         if d_km <= max_allowed_dist:
                             raw_name = it.get("display_name", "").split(",")[0].strip()
                             name = raw_name or term.title()
+                            d_meters = round(d_km * 1000)
+                            d_display = f"{d_meters} m" if d_km < 1.0 else f"{d_km:.2f} km"
+                            osm_id = it.get("osm_id") or it.get("place_id") or f"{it_lat}-{it_lon}"
+                            osm_type = it.get("osm_type", "node")
                             found.append({
+                                "id": f"{osm_type}/{osm_id}",
                                 "name": name,
-                                "category": cat_label,
+                                "category": meta["label"],
                                 "cat_key": cat_key,
+                                "icon": meta["icon"],
                                 "distance_km": d_km,
                                 "distanceKm": d_km,
+                                "distance_meters": d_meters,
+                                "distance_display": d_display,
                                 "address": it.get("display_name"),
                                 "lat": it_lat,
                                 "lng": it_lon,
                                 "status": "Verified Proximity",
+                                "osm_type": osm_type,
+                                "osm_id": osm_id,
                             })
                     break
                 elif resp.status_code == 429 and attempt == 0:
-                    # Rate limited: back off and retry once
                     await asyncio.sleep(0.5)
                 else:
                     break
@@ -167,8 +207,7 @@ async def _query_single_nominatim_term(
                 logger.debug(f"Nominatim lookup error for '{term}': {exc}")
                 if attempt == 0:
                     await asyncio.sleep(0.3)
-            # Gentle inter-request pacing
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.08)
 
     return found
 
@@ -179,7 +218,6 @@ async def _fetch_from_nominatim_fallback(
     """
     High-reliability fallback: Queries OpenStreetMap Nominatim search
     bounded by the search bounding box when Overpass mirrors encounter timeouts or rate limits.
-    Runs category searches with controlled concurrency (sem=2) to respect rate limits.
     """
     delta_lat = radius_km / 111.0
     delta_lng = radius_km / (111.0 * max(0.1, math.cos(math.radians(lat))))
@@ -196,24 +234,35 @@ async def _fetch_from_nominatim_fallback(
     viewbox_transit = f"{lng - delta_lng_t:.5f},{lat + delta_lat_t:.5f},{lng + delta_lng_t:.5f},{lat - delta_lat_t:.5f}"
 
     queries = {
-        "bus_stands": [("bus station", "Bus Stand / Station"), ("bus stop", "Local Bus Stop")],
+        "hospitals": [("hospital", "Hospital"), ("government hospital", "Hospital")],
+        "clinics": [("clinic", "Clinic"), ("doctor", "Healthcare Clinic")],
+        "pharmacies": [("pharmacy", "Pharmacy"), ("chemist", "Pharmacy")],
+        "schools": [("school", "School"), ("higher secondary school", "School")],
+        "colleges": [("college", "College"), ("university", "University")],
+        "police_stations": [("police station", "Police Station")],
+        "fire_stations": [("fire station", "Fire Station")],
         "railway_stations": [("railway station", "Railway Station")],
+        "bus_stops": [("bus station", "Bus Station"), ("bus stop", "Bus Stop")],
+        "banks_atms": [("bank", "Bank"), ("atm", "ATM")],
+        "supermarkets": [("supermarket", "Supermarket"), ("shopping mall", "Shopping Mall")],
+        "restaurants": [("restaurant", "Restaurant"), ("hotel food", "Restaurant")],
+        "fuel_stations": [("petrol bunk", "Fuel Station"), ("fuel station", "Fuel Station")],
+        "parks": [("park", "Public Park"), ("garden", "Public Garden")],
         "airports": [("airport", "Airport / Aviation")],
-        "hospitals": [("hospital", "Hospital / Clinic"), ("clinic", "Healthcare Clinic")],
-        "schools": [("school", "School / College"), ("college", "Higher Education / College")],
-        "commercial": [("shopping mall", "Commercial / Shopping"), ("supermarket", "Commercial / Retail")],
-        "roads": [("Main Road", "Road Network"), ("High Road", "Road Network"), ("Salai", "Road Network")],
-        "water_bodies": [("river", "Hydrology / River"), ("lake", "Hydrology / Water Body"), ("canal", "Hydrology / Canal")],
+        "roads": [("Main Road", "Road Network"), ("Salai", "Road Network")],
+        "water_bodies": [("river", "Hydrology / River"), ("lake", "Hydrology / Water Body")],
     }
 
     headers = {
         "User-Agent": "SmartLandAnalysis/2.0 (Academic Geospatial Research; contact@smartland.edu)"
     }
-    results: Dict[str, List[Dict[str, Any]]] = {k: [] for k in queries}
+    results: Dict[str, List[Dict[str, Any]]] = {k: [] for k in FACILITY_CATEGORY_META}
+    results["bus_stands"] = []
+    results["commercial"] = []
     sem = asyncio.Semaphore(4)
 
     tasks = []
-    async with httpx.AsyncClient(timeout=6.0) as client:
+    async with httpx.AsyncClient(timeout=7.0) as client:
         for cat_key, term_list in queries.items():
             vb = viewbox_transit if cat_key == "airports" else viewbox_local
             for term, cat_label in term_list:
@@ -231,6 +280,9 @@ async def _fetch_from_nominatim_fallback(
                     if c_key in results:
                         results[c_key].append(item)
 
+    # Aliases
+    results["bus_stands"] = results.get("bus_stops", [])
+    results["commercial"] = results.get("supermarkets", [])
     return results
 
 
@@ -239,24 +291,55 @@ async def _execute_fetch(
     lng: float,
     radius_km: float,
 ) -> Dict[str, Any]:
-    """Internal implementation of geospatial facility lookup."""
+    """Internal implementation of comprehensive geospatial facility lookup."""
     local_m = int(radius_km * 1000)
     transit_radius_m = int(max(local_m, 35000))
-    bus_stop_m = int(min(local_m, 2500))
+    bus_stop_m = int(min(local_m, 4000))
 
     query = f"""
-    [out:json][timeout:6];
+    [out:json][timeout:12];
     (
-      nwr["amenity"~"bus_station|hospital|clinic|school|college|university"](around:{local_m},{lat},{lng});
-      node["highway"="bus_stop"](around:{bus_stop_m},{lat},{lng});
+      // 1. Healthcare: Hospitals, Clinics, Doctors, Pharmacies
+      nwr["amenity"~"hospital|clinic|doctors|pharmacy"](around:{local_m},{lat},{lng});
+      nwr["healthcare"~"hospital|clinic|doctor|pharmacy|centre"](around:{local_m},{lat},{lng});
+      nwr["shop"~"chemist|pharmacy"](around:{local_m},{lat},{lng});
+
+      // 2. Education: Schools, Colleges, Universities
+      nwr["amenity"~"school|college|university|kindergarten"](around:{local_m},{lat},{lng});
+
+      // 3. Emergency & Civic: Police, Fire Stations
+      nwr["amenity"~"police|fire_station"](around:{local_m},{lat},{lng});
+
+      // 4. Transit: Railway Stations, Bus Stations, Bus Stops
       nwr["railway"~"station|halt"](around:{local_m},{lat},{lng});
+      nwr["amenity"="bus_station"](around:{local_m},{lat},{lng});
+      node["highway"="bus_stop"](around:{bus_stop_m},{lat},{lng});
+      node["public_transport"~"stop_position|platform"](around:{bus_stop_m},{lat},{lng});
+
+      // 5. Finance: Banks and ATMs
+      nwr["amenity"~"bank|atm"](around:{local_m},{lat},{lng});
+
+      // 6. Food & Dining: Restaurants, Cafes, Fast Food
+      nwr["amenity"~"restaurant|cafe|fast_food|food_court"](around:{local_m},{lat},{lng});
+
+      // 7. Shopping & Supermarkets
+      nwr["shop"~"supermarket|grocery|mall|department_store|convenience"](around:{local_m},{lat},{lng});
+
+      // 8. Fuel & Automotive
+      nwr["amenity"="fuel"](around:{local_m},{lat},{lng});
+
+      // 9. Parks & Recreation
+      nwr["leisure"~"park|garden|recreation_ground"](around:{local_m},{lat},{lng});
+
+      // 10. Regional transit & aviation
       nwr["aeroway"~"aerodrome|terminal"](around:{transit_radius_m},{lat},{lng});
-      nwr["shop"~"supermarket|mall|department_store|convenience"](around:{local_m},{lat},{lng});
-      way["highway"~"motorway|trunk|primary|secondary"](around:1500,{lat},{lng});
-      way["waterway"~"river|canal"](around:2500,{lat},{lng});
-      way["natural"="water"](around:2500,{lat},{lng});
+
+      // 11. Roads & Water Bodies
+      way["highway"~"motorway|trunk|primary|secondary"](around:2000,{lat},{lng});
+      way["waterway"~"river|canal"](around:3000,{lat},{lng});
+      way["natural"="water"](around:3000,{lat},{lng});
     );
-    out center 120;
+    out center 250;
     """
 
     headers = {
@@ -267,10 +350,10 @@ async def _execute_fetch(
     source = "Geospatial Overpass Engine"
     overpass_succeeded = False
 
-    for endpoint in OVERPASS_ENDPOINTS[:2]:
+    for endpoint in OVERPASS_ENDPOINTS[:3]:
         try:
             logger.info(f"Connecting to Overpass endpoint: {endpoint}")
-            async with httpx.AsyncClient(timeout=2.5) as client:
+            async with httpx.AsyncClient(timeout=7.0) as client:
                 resp = await client.post(endpoint, data={"data": query}, headers=headers)
                 if resp.status_code == 200:
                     data = resp.json()
@@ -285,16 +368,9 @@ async def _execute_fetch(
             logger.warning(f"Overpass endpoint {endpoint} error: {exc}")
             continue
 
-    categories: Dict[str, List[Dict[str, Any]]] = {
-        "bus_stands": [],
-        "railway_stations": [],
-        "airports": [],
-        "hospitals": [],
-        "schools": [],
-        "commercial": [],
-        "roads": [],
-        "water_bodies": [],
-    }
+    categories: Dict[str, List[Dict[str, Any]]] = {k: [] for k in FACILITY_CATEGORY_META}
+    categories["bus_stands"] = []
+    categories["commercial"] = []
 
     if overpass_succeeded:
         for elem in elements:
@@ -304,126 +380,133 @@ async def _execute_fetch(
                 continue
 
             dist_km = haversine_distance_km(lat, lng, elem_lat, elem_lon)
+            # Skip items beyond requested search radius (except regional airports)
+            is_airport = "aeroway" in tags
+            if not is_airport and dist_km > (radius_km * 1.05):
+                continue
+
             addr = _format_address(tags)
             name = tags.get("name") or tags.get("name:en")
+            osm_id = elem.get("id")
+            osm_type = elem.get("type", "node")
+            uid = f"{osm_type}/{osm_id}"
+            dist_meters = round(dist_km * 1000)
+            dist_display = f"{dist_meters} m" if dist_km < 1.0 else f"{dist_km:.2f} km"
 
-            # 1. Bus stands & stops
-            if tags.get("amenity") == "bus_station" or tags.get("highway") == "bus_stop":
-                facility_name = name or ("Bus Station" if tags.get("amenity") == "bus_station" else "Local Bus Stop")
-                categories["bus_stands"].append({
-                    "name": facility_name,
-                    "category": "Bus Stand / Station",
+            def make_item(c_key: str, default_name: str) -> Dict[str, Any]:
+                meta = FACILITY_CATEGORY_META.get(c_key, {"label": c_key.title(), "icon": "📍"})
+                return {
+                    "id": uid,
+                    "name": name or default_name,
+                    "category": meta["label"],
+                    "cat_key": c_key,
+                    "icon": meta["icon"],
                     "distance_km": dist_km,
                     "distanceKm": dist_km,
+                    "distance_meters": dist_meters,
+                    "distance_display": dist_display,
                     "address": addr,
                     "lat": elem_lat,
                     "lng": elem_lon,
                     "status": "Verified Proximity",
-                })
+                    "osm_type": osm_type,
+                    "osm_id": osm_id,
+                }
 
-            # 2. Railway stations
-            elif tags.get("railway") in ("station", "halt"):
-                facility_name = name or ("Railway Station" if tags.get("railway") == "station" else "Railway Halt")
-                categories["railway_stations"].append({
-                    "name": facility_name,
-                    "category": "Railway Station",
-                    "distance_km": dist_km,
-                    "distanceKm": dist_km,
-                    "address": addr,
-                    "lat": elem_lat,
-                    "lng": elem_lon,
-                    "status": "Verified Proximity",
-                })
+            amenity = tags.get("amenity", "")
+            healthcare = tags.get("healthcare", "")
+            shop = tags.get("shop", "")
+            railway = tags.get("railway", "")
+            highway = tags.get("highway", "")
+            leisure = tags.get("leisure", "")
 
-            # 3. Airports
+            # 1. Hospitals
+            if amenity == "hospital" or healthcare == "hospital":
+                categories["hospitals"].append(make_item("hospitals", "General Hospital"))
+
+            # 2. Clinics & Medical Centers
+            elif amenity in ("clinic", "doctors", "health_post") or healthcare in ("clinic", "doctor", "centre"):
+                categories["clinics"].append(make_item("clinics", "Healthcare Clinic / Medical Practice"))
+
+            # 3. Pharmacies & Chemists
+            elif amenity == "pharmacy" or healthcare == "pharmacy" or shop in ("chemist", "pharmacy"):
+                categories["pharmacies"].append(make_item("pharmacies", "Pharmacy / Medical Chemist"))
+
+            # 4. Schools
+            elif amenity in ("school", "kindergarten"):
+                categories["schools"].append(make_item("schools", "Primary / Secondary School"))
+
+            # 5. Colleges & Universities
+            elif amenity in ("college", "university"):
+                categories["colleges"].append(make_item("colleges", "College / University Campus"))
+
+            # 6. Police Stations
+            elif amenity == "police":
+                categories["police_stations"].append(make_item("police_stations", "Police Station"))
+
+            # 7. Fire Stations
+            elif amenity == "fire_station":
+                categories["fire_stations"].append(make_item("fire_stations", "Fire & Rescue Station"))
+
+            # 8. Railway Stations & Halts
+            elif railway in ("station", "halt") or tags.get("station") == "subway":
+                station_label = "Railway Station" if railway == "station" else "Railway Halt"
+                categories["railway_stations"].append(make_item("railway_stations", station_label))
+
+            # 9. Bus Stops & Terminals
+            elif amenity == "bus_station" or highway == "bus_stop" or tags.get("public_transport") in ("stop_position", "platform"):
+                bus_label = "Bus Terminal / Station" if amenity == "bus_station" else "Local Bus Stop"
+                item = make_item("bus_stops", bus_label)
+                categories["bus_stops"].append(item)
+                categories["bus_stands"].append(item)
+
+            # 10. Banks & ATMs
+            elif amenity in ("bank", "atm"):
+                fin_label = "Bank Branch" if amenity == "bank" else "ATM Kiosk"
+                categories["banks_atms"].append(make_item("banks_atms", fin_label))
+
+            # 11. Supermarkets & Retail Shopping
+            elif shop in ("supermarket", "grocery", "mall", "department_store", "convenience") or amenity == "marketplace":
+                shop_label = "Supermarket" if shop == "supermarket" else "Retail Center / Store"
+                item = make_item("supermarkets", shop_label)
+                categories["supermarkets"].append(item)
+                categories["commercial"].append(item)
+
+            # 12. Restaurants, Cafes & Food
+            elif amenity in ("restaurant", "cafe", "fast_food", "food_court"):
+                food_label = "Restaurant" if amenity == "restaurant" else "Cafe / Eatery"
+                categories["restaurants"].append(make_item("restaurants", food_label))
+
+            # 13. Fuel Stations
+            elif amenity == "fuel":
+                categories["fuel_stations"].append(make_item("fuel_stations", "Fuel / Petrol Station"))
+
+            # 14. Parks & Public Gardens
+            elif leisure in ("park", "garden", "recreation_ground") or tags.get("landuse") == "recreation_ground":
+                categories["parks"].append(make_item("parks", "Public Park / Garden"))
+
+            # 15. Airports
             elif "aeroway" in tags:
-                facility_name = name or "Regional Airport / Airfield"
-                categories["airports"].append({
-                    "name": facility_name,
-                    "category": "Airport / Aviation",
-                    "distance_km": dist_km,
-                    "distanceKm": dist_km,
-                    "address": addr,
-                    "lat": elem_lat,
-                    "lng": elem_lon,
-                    "status": "Verified Proximity",
-                })
+                categories["airports"].append(make_item("airports", "Regional Airport / Airfield"))
 
-            # 4. Hospitals & Clinics
-            elif tags.get("amenity") in ("hospital", "clinic", "doctors"):
-                facility_name = name or ("Hospital" if tags.get("amenity") == "hospital" else "Healthcare Clinic")
-                categories["hospitals"].append({
-                    "name": facility_name,
-                    "category": "Hospital / Clinic",
-                    "distance_km": dist_km,
-                    "distanceKm": dist_km,
-                    "address": addr,
-                    "lat": elem_lat,
-                    "lng": elem_lon,
-                    "status": "Verified Proximity",
-                })
+            # 16. Road Network Corridors
+            elif highway in ("motorway", "trunk", "primary", "secondary"):
+                h_name = name or tags.get("ref") or f"{highway.capitalize()} Highway Corridor"
+                categories["roads"].append(make_item("roads", h_name))
 
-            # 5. Schools & Colleges
-            elif tags.get("amenity") in ("school", "college", "university", "kindergarten"):
-                amenity_type = tags.get("amenity", "school").capitalize()
-                facility_name = name or f"Educational Institution ({amenity_type})"
-                categories["schools"].append({
-                    "name": facility_name,
-                    "category": f"School / College ({amenity_type})",
-                    "distance_km": dist_km,
-                    "distanceKm": dist_km,
-                    "address": addr,
-                    "lat": elem_lat,
-                    "lng": elem_lon,
-                    "status": "Verified Proximity",
-                })
-
-            # 6. Commercial & Shopping
-            elif "shop" in tags or tags.get("amenity") == "marketplace":
-                shop_type = tags.get("shop", "market").replace("_", " ").title()
-                categories["commercial"].append({
-                    "name": name or f"Commercial Center ({shop_type})",
-                    "category": f"Commercial / Shopping ({shop_type})",
-                    "distance_km": dist_km,
-                    "distanceKm": dist_km,
-                    "address": addr,
-                    "lat": elem_lat,
-                    "lng": elem_lon,
-                    "status": "Verified Proximity",
-                })
-
-            # 7. Main Roads & Highways
-            elif "highway" in tags:
-                h_type = tags.get("highway", "Road").replace("_", " ").title()
-                categories["roads"].append({
-                    "name": name or tags.get("ref") or f"{h_type} Corridor",
-                    "category": f"Road Network ({h_type})",
-                    "distance_km": dist_km,
-                    "distanceKm": dist_km,
-                    "address": addr,
-                    "lat": elem_lat,
-                    "lng": elem_lon,
-                    "status": "Verified Proximity",
-                })
-
-            # 8. Water Bodies
+            # 17. Hydrology / Water Bodies
             elif "waterway" in tags or tags.get("natural") == "water":
-                w_type = (tags.get("waterway") or tags.get("natural") or "Water").capitalize()
-                categories["water_bodies"].append({
-                    "name": name or f"Water Body ({w_type})",
-                    "category": f"Hydrology / Water Body ({w_type})",
-                    "distance_km": dist_km,
-                    "distanceKm": dist_km,
-                    "address": addr,
-                    "lat": elem_lat,
-                    "lng": elem_lon,
-                    "status": "Verified Proximity",
-                })
+                w_name = name or f"Water Body ({tags.get('waterway') or 'Water'})"
+                categories["water_bodies"].append(make_item("water_bodies", w_name))
 
-    # If Overpass failed, had 0 items, or is missing linear categories (roads, water bodies),
-    # activate Nominatim fallback to supplement/fill real data
-    total_parsed = sum(len(v) for v in categories.values())
-    needs_fallback = (not overpass_succeeded) or (total_parsed == 0) or (len(categories["roads"]) == 0 and len(categories["water_bodies"]) == 0)
+    # Aliases
+    categories["bus_stands"] = categories.get("bus_stops", [])
+    categories["commercial"] = categories.get("supermarkets", [])
+
+    # If Overpass failed, had 0 items, or is missing essential civic categories,
+    # trigger Nominatim fallback to supplement/fill genuine data
+    total_parsed = sum(len(v) for k, v in categories.items() if k not in ("bus_stands", "commercial"))
+    needs_fallback = (not overpass_succeeded) or (total_parsed == 0)
 
     if needs_fallback:
         logger.info("Executing secondary geospatial fallback to enrich nearby facilities...")
@@ -433,40 +516,65 @@ async def _execute_fetch(
                 if cat_key in categories:
                     if not overpass_succeeded or len(categories[cat_key]) == 0:
                         categories[cat_key].extend(items)
+            categories["bus_stands"] = categories.get("bus_stops", [])
+            categories["commercial"] = categories.get("supermarkets", [])
             if not overpass_succeeded or total_parsed == 0:
-                source = "Geospatial Proximity Service"
+                source = "Geospatial Proximity Service (Nominatim OSM)"
             else:
-                source = "Hybrid Geospatial Service"
+                source = "Hybrid Geospatial Service (Overpass + Nominatim)"
         except Exception as exc:
             logger.warning(f"Secondary fallback error: {exc}")
 
-    # Deduplicate and sort by geodesic distance in km (closest first)
+    # Deduplicate within each category by ID and normalized name, sort closest first
     for cat_key in categories:
+        seen_ids = set()
         seen_names = set()
         deduped = []
         for item in sorted(categories[cat_key], key=lambda x: x["distance_km"]):
+            i_id = item.get("id")
             n_clean = item["name"].strip().lower()
-            if n_clean not in seen_names:
-                seen_names.add(n_clean)
-                deduped.append(item)
-        categories[cat_key] = deduped[:8]
+            if i_id and i_id in seen_ids:
+                continue
+            if n_clean in seen_names:
+                continue
+            if i_id:
+                seen_ids.add(i_id)
+            seen_names.add(n_clean)
+            deduped.append(item)
+        # Retain top 12 closest facilities per category
+        categories[cat_key] = deduped[:12]
 
-    summary_counts = {cat_key: len(items) for cat_key, items in categories.items()}
-    total_found = sum(summary_counts.values())
+    # Global all_facilities list (distinct items across all categories)
+    all_facilities_map: Dict[str, Dict[str, Any]] = {}
+    for cat_key, items in categories.items():
+        if cat_key in ("bus_stands", "commercial"):
+            continue  # Avoid duplicate entries from alias keys
+        for it in items:
+            key = it.get("id") or f"{it.get('lat')}:{it.get('lng')}:{it.get('name')}"
+            if key not in all_facilities_map:
+                all_facilities_map[key] = it
+
+    all_facilities = sorted(all_facilities_map.values(), key=lambda x: x["distance_km"])
+    summary_counts = {
+        cat_key: len(items)
+        for cat_key, items in categories.items()
+        if cat_key not in ("bus_stands", "commercial")
+    }
+    total_found = len(all_facilities)
 
     if total_found > 0:
         status_str = "success"
-        message_str = f"Found {total_found} nearby facilities within {radius_km} km radius."
+        message_str = f"Found {total_found} verified facilities within {radius_km} km radius in OpenStreetMap."
     elif overpass_succeeded:
         status_str = "empty"
-        message_str = f"No facilities identified within {radius_km} km radius."
+        message_str = f"No facilities identified within {radius_km} km radius in OpenStreetMap."
     else:
         status_str = "unavailable"
-        message_str = "Facility proximity service is temporarily busy. Please retry shortly."
+        message_str = "Geospatial facility service is temporarily busy. Please retry shortly."
 
     disclaimer_str = (
         "Distances represent straight-line geodesic distance in kilometres (km) "
-        "measured from the parcel centroid or selected GPS coordinates. "
+        "measured accurately from the parcel centroid or selected GPS coordinates using Haversine calculation. "
         "Road driving routes and navigation distances may vary based on local street topology and traffic networks."
     )
 
@@ -481,10 +589,8 @@ async def _execute_fetch(
         },
         "search_radius_km": radius_km,
         "categories": categories,
-        **categories,  # Expose bus_stands, railway_stations, etc. at root level for direct access
-        "all_facilities": [
-            item for cat_list in categories.values() for item in cat_list
-        ],
+        **categories,  # Expose bus_stops, hospitals, schools, etc. at root level for backward compatibility
+        "all_facilities": all_facilities,
         "summary_counts": summary_counts,
         "total_facilities_found": total_found,
         "total_found": total_found,
@@ -502,11 +608,11 @@ async def fetch_nearby_facilities(
 ) -> Dict[str, Any]:
     """
     Queries real geospatial infrastructure data around the specified coordinates,
-    computes geodesic distances in km, and categorizes into the 8 required categories.
+    computes geodesic distances in km, and categorizes into the 14 mandatory categories.
 
     Resilience architecture:
     1. In-flight request deduplication: simultaneous calls share a single async task.
-    2. Multi-mirror Overpass query pool with automated failover and fast timeouts.
+    2. Multi-mirror Overpass query pool with automated failover and 7s timeouts.
     3. High-reliability fallback to OpenStreetMap Nominatim bounded search.
     4. Category isolation: failures in one category do not wipe other categories.
     5. Distinct status tagging: 'success', 'empty', 'unavailable', or 'invalid_coordinates'.
@@ -564,4 +670,3 @@ async def fetch_nearby_facilities(
 
 # Public alias for consistent naming
 search_nearby_facilities = fetch_nearby_facilities
-

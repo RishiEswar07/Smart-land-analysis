@@ -29,6 +29,7 @@ export const MAP_LAYERS = {
             'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
           ],
           tileSize: 256,
+          maxzoom: 18,
           attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
         },
       },
@@ -59,6 +60,7 @@ export const MAP_LAYERS = {
             'https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png',
           ],
           tileSize: 256,
+          maxzoom: 19,
           attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, &copy; <a href="https://carto.com/attributions">CARTO</a>',
         },
       },
@@ -68,7 +70,7 @@ export const MAP_LAYERS = {
           type: 'raster',
           source: 'carto-tiles',
           minzoom: 0,
-          maxzoom: 20,
+          maxzoom: 22,
         },
       ],
     },
@@ -87,6 +89,7 @@ export const MAP_LAYERS = {
             'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
           ],
           tileSize: 256,
+          maxzoom: 18,
           attribution: 'Tiles &copy; Esri &mdash; Sources: GEBCO, NOAA, CHS, OSU, UNH, CSUMB, National Geographic, DeLorme, NAVTEQ, and Esri',
         },
       },
@@ -96,7 +99,7 @@ export const MAP_LAYERS = {
           type: 'raster',
           source: 'terrain-tiles',
           minzoom: 0,
-          maxzoom: 19,
+          maxzoom: 22,
         },
       ],
     },
@@ -168,6 +171,7 @@ export default function MapPicker({
   const [isLayerMenuOpen, setIsLayerMenuOpen] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [isPanelCollapsed, setIsPanelCollapsed] = useState(false)
+  const [isMapLoading, setIsMapLoading] = useState(false)
 
   // Drawing & editing state
   const [isDrawing, setIsDrawing] = useState(false)
@@ -597,6 +601,14 @@ export default function MapPicker({
 
       {/* ---------------- 2. MAP CANVAS ---------------- */}
       <div className="flex-1 w-full h-full relative">
+        {/* Subtle Map Tile Loading Indicator */}
+        {isMapLoading && (
+          <div className="absolute top-14 left-3 z-20 pointer-events-none flex items-center gap-1.5 px-3 py-1 bg-slate-900/80 backdrop-blur-md text-white text-[11px] font-medium rounded-full shadow-md animate-fadeUp">
+            <span className="w-2 h-2 rounded-full border-2 border-white border-t-transparent animate-spin" />
+            <span>Loading map tiles…</span>
+          </div>
+        )}
+
         <MapErrorBoundary>
           <Map
             ref={mapRef}
@@ -607,10 +619,18 @@ export default function MapPicker({
               pitch: 0,
               bearing: 0,
             }}
+            minZoom={2}
+            maxZoom={20}
             mapStyle={MAP_LAYERS[activeLayer].style}
             style={{ width: '100%', height: '100%' }}
             onClick={handleMapClick}
             onMouseMove={handleMapMouseMove}
+            onDataLoading={() => setIsMapLoading(true)}
+            onIdle={() => setIsMapLoading(false)}
+            onError={(e) => {
+              // Log gracefully without breaking user canvas or showing false missing data
+              console.warn('MapLibre tile loading notice:', e?.error?.message || e)
+            }}
             cursor={isDrawing ? 'crosshair' : isEditing ? 'move' : 'pointer'}
             interactiveLayerIds={[]}
           >

@@ -75,9 +75,16 @@ def generate_land_report_excel(land: Land, analysis: Analysis, details: dict) ->
     if rw is None and land:
         rw = getattr(land, "road_width_ft", None)
     try:
-        rw_str = f"{float(rw):.0f} ft" if (rw is not None and float(rw) > 0) else "Width data unavailable"
+        if rw is not None and float(rw) > 0:
+            rw_m = round(float(rw) * 0.3048, 1)
+            rw_str = f"{float(rw):.1f} ft ({rw_m:.1f} m)"
+            rw_status = "Verified Tagged Width"
+        else:
+            rw_str = "Road width data unavailable"
+            rw_status = "Manual road-width verification required"
     except (ValueError, TypeError):
-        rw_str = "Width data unavailable"
+        rw_str = "Road width data unavailable"
+        rw_status = "Manual road-width verification required"
 
     soil_raw = getattr(land, "soil_type", None) if land else None
     soil_val = getattr(soil_raw, "value", str(soil_raw)) if soil_raw else "Loamy"
@@ -86,12 +93,10 @@ def generate_land_report_excel(land: Land, analysis: Analysis, details: dict) ->
     land_type_val = getattr(ltype_raw, "value", str(ltype_raw)) if ltype_raw else "Residential"
 
     water_avail = getattr(land, "water_availability", None) if land else None
-    if water_avail is None and land:
-        water_avail = getattr(land, "water_facility", False)
-
     elec_avail = getattr(land, "electricity_availability", None) if land else None
-    if elec_avail is None and land:
-        elec_avail = getattr(land, "electricity_facility", False)
+
+    water_status = "Available" if water_avail is True else ("Not Available" if water_avail is False else "Data Not Available")
+    elec_status = "Available" if elec_avail is True else ("Not Available" if elec_avail is False else "Data Not Available")
 
     prop_rows = [
         ("Land Name / Identifier", (land.land_name if land else None) or "Selected Parcel"),
@@ -102,11 +107,12 @@ def generate_land_report_excel(land: Land, analysis: Analysis, details: dict) ->
         ("Parcel Area (Sq.Meters)", f"{area_sqm:,.2f} m²"),
         ("Parcel Area (Cents)", f"{area_cents:,.4f} cents"),
         ("Parcel Area (Acres)", f"{area_acres:,.4f} acres"),
-        ("Road Access Width", rw_str),
+        ("Abutting Road Width", rw_str),
+        ("Road Verification Status", rw_status),
         ("Soil Taxonomy", soil_val),
         ("Zoning / Land Type", land_type_val),
-        ("Water Utility Status", "Available" if bool(water_avail) else "Not Available"),
-        ("Electricity Utility Status", "Available" if bool(elec_avail) else "Not Available"),
+        ("Water Utility Status", water_status),
+        ("Electricity Utility Status", elec_status),
     ]
 
     for idx, (label, val) in enumerate(prop_rows, start=5):

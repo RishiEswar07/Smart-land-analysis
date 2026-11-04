@@ -406,8 +406,10 @@ function DetailedLandAnalysisModalContent({
 
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
                     <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
-                      <span className="text-slate-400 block text-[10px]">Location</span>
-                      <span className="font-semibold text-slate-800 line-clamp-1">{prop.land_name || 'Selected Plot'}</span>
+                      <span className="text-slate-400 block text-[10px]">Location Address</span>
+                      <span className="font-semibold text-slate-800 line-clamp-1" title={prop.address || prop.land_name}>
+                        {prop.address || prop.land_name || 'Selected Plot'}
+                      </span>
                     </div>
                     <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
                       <span className="text-slate-400 block text-[10px]">Building Target</span>
@@ -423,10 +425,33 @@ function DetailedLandAnalysisModalContent({
                       </div>
                     </div>
                     <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
-                      <span className="text-slate-400 block text-[10px]">Road Width</span>
-                      <span className="font-semibold text-slate-800">
-                        {prop.road_width_ft ? `${prop.road_width_ft} ft` : 'Width data unavailable'}
-                      </span>
+                      <span className="text-slate-400 block text-[10px]">Abutting Road Access</span>
+                      <div className="text-slate-800 space-y-0.5">
+                        <div className="font-semibold text-xs">
+                          {prop.has_tagged_width
+                            ? `${prop.tagged_road_width_ft} ft (${prop.tagged_road_width_m} m)`
+                            : 'Road width data unavailable'}
+                        </div>
+                        {prop.has_estimated_carriageway && (
+                          <div className="text-[10px] text-blue-800 font-medium">
+                            Est. Carriageway: {prop.estimated_carriageway_width_ft} ft ({prop.estimated_carriageway_width_m} m)
+                          </div>
+                        )}
+                        {prop.road_name && (
+                          <div className="text-[10px] text-slate-600 truncate">
+                            {prop.road_name} {prop.road_type_display ? `(${prop.road_type_display})` : ''}
+                          </div>
+                        )}
+                        <div className="pt-0.5">
+                          <span className={`inline-block text-[9px] font-bold px-1.5 py-0.2 rounded ${
+                            prop.has_tagged_width
+                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                              : 'bg-amber-100 text-amber-900 border border-amber-200'
+                          }`}>
+                            {prop.has_tagged_width ? 'Verified Tagged' : 'Manual verification required'}
+                          </span>
+                        </div>
+                      </div>
                     </div>
                     <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
                       <span className="text-slate-400 block text-[10px]">Soil Taxonomy</span>
@@ -435,6 +460,26 @@ function DetailedLandAnalysisModalContent({
                     <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
                       <span className="text-slate-400 block text-[10px]">Zoning / Land Type</span>
                       <span className="font-semibold text-slate-800">{prop.land_type || 'Residential'}</span>
+                    </div>
+                    <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                      <span className="text-slate-400 block text-[10px]">Water Infrastructure</span>
+                      <span className={`font-semibold ${prop.water_availability === true ? 'text-emerald-700' : prop.water_availability === false ? 'text-rose-700' : 'text-slate-700'}`}>
+                        {prop.water_availability === true
+                          ? 'Available'
+                          : prop.water_availability === false
+                          ? 'Not Available'
+                          : 'Data Not Available'}
+                      </span>
+                    </div>
+                    <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                      <span className="text-slate-400 block text-[10px]">Electricity Infrastructure</span>
+                      <span className={`font-semibold ${prop.electricity_availability === true ? 'text-emerald-700' : prop.electricity_availability === false ? 'text-rose-700' : 'text-slate-700'}`}>
+                        {prop.electricity_availability === true
+                          ? 'Available'
+                          : prop.electricity_availability === false
+                          ? 'Not Available'
+                          : 'Data Not Available'}
+                      </span>
                     </div>
                   </div>
 

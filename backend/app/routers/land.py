@@ -31,6 +31,7 @@ from app.services import comparison_service, land_service
 from app.services.building_rule_service import evaluate_building_rules
 from app.services.exceptions import NotFoundError
 from app.services.facility_service import fetch_nearby_facilities
+from app.services.road_service import detect_nearest_road
 
 router = APIRouter(prefix="/lands", tags=["Land Management"])
 
@@ -138,6 +139,20 @@ async def search_nearby_facilities(
         **data,
         **data.get("categories", {}),
     }
+
+
+@router.get(
+    "/road-access/detect",
+    status_code=status.HTTP_200_OK,
+    summary="Detect nearest accessible road, true distance, and width from OpenStreetMap",
+)
+async def detect_road_access(
+    lat: float = Query(..., ge=-90.0, le=90.0),
+    lng: float = Query(..., ge=-180.0, le=180.0),
+):
+    """Detects abutting road, geometric proximity in meters, and width under TNCDBR guidelines."""
+    data = await detect_nearest_road(lat, lng)
+    return data
 
 
 @router.get(

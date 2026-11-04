@@ -132,6 +132,87 @@ export default function LandAnalysis() {
   const [result, setResult] = useState(savedState?.result || null)
   const [planningRules, setPlanningRules] = useState(savedState?.planningRules || null)
   const [showDetailedModal, setShowDetailedModal] = useState(false)
+  const [selectedAddress, setSelectedAddress] = useState(savedState?.gisData?.address || null)
+  const [isAddressLoading, setIsAddressLoading] = useState(false)
+  const [selectedRoad, setSelectedRoad] = useState(savedState?.gisData?.roadDetails || null)
+  const [isRoadLoading, setIsRoadLoading] = useState(false)
+
+  // Reverse geocode & road access detection whenever location or boundary changes
+  useEffect(() => {
+    const lat = activeBoundary?.centroid?.lat || clickedLocation?.lat
+    const lng = activeBoundary?.centroid?.lng || clickedLocation?.lng
+    if (lat !== undefined && lat !== null && lng !== undefined && lng !== null) {
+      let isSubscribed = true
+      setIsAddressLoading(true)
+      setIsRoadLoading(true)
+
+      // 1. Geocode locality address
+      geocodeService
+        .reverseGeocode(lat, lng)
+        .then((addr) => {
+          if (isSubscribed) {
+            setSelectedAddress(addr)
+            setGisData((prev) => ({ ...prev, address: addr }))
+          }
+        })
+        .catch(() => {
+          if (isSubscribed) {
+            const fallback = 'Address unlisted in open registry (Cadastral survey required)'
+            setSelectedAddress(fallback)
+            setGisData((prev) => ({ ...prev, address: fallback }))
+          }
+        })
+        .finally(() => {
+          if (isSubscribed) setIsAddressLoading(false)
+        })
+
+      // 2. Detect abutting road and statutory corridor width
+      gisService
+        .fetchNearestRoad(lat, lng, activeBoundary?.coords)
+        .then((road) => {
+          if (isSubscribed) {
+            setSelectedRoad(road)
+            setGisData((prev) => ({
+              ...prev,
+              road_width: road?.verified_road_width_ft || null,
+              road_width_ft: road?.verified_road_width_ft || null,
+              road_width_m: road?.verified_road_width_m || null,
+              verified_road_width_ft: road?.verified_road_width_ft || null,
+              verified_road_width_m: road?.verified_road_width_m || null,
+              has_tagged_width: Boolean(road?.has_tagged_width),
+              tagged_road_width_ft: road?.tagged_road_width_ft || null,
+              tagged_road_width_m: road?.tagged_road_width_m || null,
+              has_estimated_carriageway: Boolean(road?.has_estimated_carriageway),
+              estimated_carriageway_width_ft: road?.estimated_carriageway_width_ft || null,
+              estimated_carriageway_width_m: road?.estimated_carriageway_width_m || null,
+              carriageway_calculation_basis: road?.carriageway_calculation_basis || null,
+              width_status: road?.width_status || 'Road width data unavailable',
+              verification_requirement: road?.verification_requirement || 'Manual road-width verification required',
+              tncdbr_eligibility: road?.tncdbr_eligibility,
+              road_name: road?.road_name,
+              road_type: road?.road_type,
+              road_type_display: road?.road_type_display,
+              road_distance_meters: road?.distance_meters,
+              road_distance_display: road?.distance_display,
+              is_road_width_estimated: road?.is_road_width_estimated || false,
+              road_confidence: road?.confidence,
+              road_data_source: road?.data_source,
+              roadDetails: road,
+            }))
+          }
+        })
+        .catch((err) => {
+          console.warn("Road lookup notice:", err)
+        })
+        .finally(() => {
+          if (isSubscribed) setIsRoadLoading(false)
+        })
+
+      return () => {
+        isSubscribed = false
+      }
+    }
+  }, [clickedLocation?.lat, clickedLocation?.lng, activeBoundary?.centroid?.lat, activeBoundary?.centroid?.lng, activeBoundary?.coords])
 
   // Non-blocking background ping on mount to wake Render container
   useEffect(() => {
@@ -339,8 +420,10 @@ export default function LandAnalysis() {
     try {
       // Run concurrent GIS queries
       const [address, infra, soil, landCover] = await Promise.all([
-        geocodeService.reverseGeocode(lat, lng).catch(() => 'Data Not Available'),
-        gisService.fetchInfrastructure(lat, lng).catch(() => ({ available: false })),
+        selectedAddress && !geocodeService.isAddressFallback(selectedAddress)
+          ? Promise.resolve(selectedAddress)
+          : geocodeService.reverseGeocode(lat, lng),
+        gisService.fetchInfrastructure(lat, lng, activeBoundary?.coords).catch(() => ({ available: false })),
         gisService.fetchSoilType(lat, lng).catch(() => ({ available: false })),
         gisService.fetchLandCover(lat, lng).catch(() => ({ available: false }))
       ]);
@@ -383,17 +466,41 @@ export default function LandAnalysis() {
       setManualArea(String(finalSqFt));
 
       setGisData({
-        address: address !== 'Data Not Available' ? address : null,
+        address: address,
         area_sqft: finalSqFt,
         area: rawArea,
         input_unit: inputUnit,
         area_source: areaSource,
         boundary_geojson: boundaryGeoJson,
         is_estimated: areaInputMode === 'direct',
-        road_width: infra.available && infra.roadWidth ? infra.roadWidth : null,
-        is_road_width_estimated: infra.isRoadWidthEstimated || false,
-        water_availability: infra.available ? infra.water : true,
-        electricity_availability: infra.available ? infra.electricity : true,
+        road_width: infra.verifiedRoadWidthFt || selectedRoad?.verified_road_width_ft || null,
+        road_width_ft: infra.verifiedRoadWidthFt || selectedRoad?.verified_road_width_ft || null,
+        road_width_m: infra.verifiedRoadWidthM || selectedRoad?.verified_road_width_m || null,
+        verified_road_width_ft: infra.verifiedRoadWidthFt || selectedRoad?.verified_road_width_ft || null,
+        verified_road_width_m: infra.verifiedRoadWidthM || selectedRoad?.verified_road_width_m || null,
+        has_tagged_width: Boolean(infra.hasTaggedWidth || selectedRoad?.has_tagged_width),
+        tagged_road_width_ft: infra.taggedRoadWidthFt || selectedRoad?.tagged_road_width_ft || null,
+        tagged_road_width_m: infra.taggedRoadWidthM || selectedRoad?.tagged_road_width_m || null,
+        has_estimated_carriageway: Boolean(infra.hasEstimatedCarriageway || selectedRoad?.has_estimated_carriageway),
+        estimated_carriageway_width_ft: infra.estimatedCarriagewayWidthFt || selectedRoad?.estimated_carriageway_width_ft || null,
+        estimated_carriageway_width_m: infra.estimatedCarriagewayWidthM || selectedRoad?.estimated_carriageway_width_m || null,
+        carriageway_calculation_basis: infra.carriagewayCalculationBasis || selectedRoad?.carriageway_calculation_basis || null,
+        width_status: infra.widthStatus || selectedRoad?.width_status || 'Road width data unavailable',
+        verification_requirement: infra.verificationRequirement || selectedRoad?.verification_requirement || 'Manual road-width verification required',
+        tncdbr_eligibility: infra.tncdbrEligibility || selectedRoad?.tncdbr_eligibility,
+        road_name: infra.roadName || selectedRoad?.road_name || null,
+        road_type: infra.roadType || selectedRoad?.road_type || null,
+        road_type_display: infra.roadTypeDisplay || selectedRoad?.road_type_display || null,
+        road_distance_meters: infra.distanceMeters ?? selectedRoad?.distance_meters ?? null,
+        road_distance_display: infra.distanceDisplay || selectedRoad?.distance_display || null,
+        is_road_width_estimated: infra.isRoadWidthEstimated || selectedRoad?.is_road_width_estimated || false,
+        road_confidence: infra.confidence || selectedRoad?.confidence || null,
+        road_data_source: infra.dataSource || selectedRoad?.data_source || null,
+        roadDetails: infra.roadDetails || selectedRoad || null,
+        water_availability: infra.available ? infra.water_availability : null,
+        electricity_availability: infra.available ? infra.electricity_availability : null,
+        water_bodies: infra.water_bodies || [],
+        water_bodies_summary: infra.water_bodies_summary || null,
         soil_type: soil.available ? normalizeSoilType(soil.mappedType) : 'Red Soil',
         land_cover: landCover.available ? landCover : null,
         lat,
@@ -433,10 +540,12 @@ export default function LandAnalysis() {
     setError(null)
     try {
       const land = await landService.createLand({
-        land_name: gisData.address ? gisData.address.split(',')[0].trim() : 'Selected Plot',
+        land_name: (gisData.address && !geocodeService.isAddressFallback(gisData.address))
+          ? gisData.address.split(',')[0].trim()
+          : 'Selected Plot',
         latitude: gisData.lat || (clickedLocation?.lat ?? 0),
         longitude: gisData.lng || (clickedLocation?.lng ?? 0),
-        address: gisData.address || "Unknown Address",
+        address: gisData.address || "Address unlisted in open registry",
         area: rawArea,
         input_unit: inputUnit,
         area_source: areaSource,
@@ -444,8 +553,8 @@ export default function LandAnalysis() {
         road_width: gisData.road_width || null,
         soil_type: normalizeSoilType(gisData.soil_type),
         land_type: "Residential",
-        water_availability: gisData.water_availability !== null ? gisData.water_availability : true,
-        electricity_availability: gisData.electricity_availability !== null ? gisData.electricity_availability : true,
+        water_availability: gisData.water_availability !== null ? gisData.water_availability : null,
+        electricity_availability: gisData.electricity_availability !== null ? gisData.electricity_availability : null,
         boundary_geojson: boundaryGeoJson,
       })
 
@@ -766,15 +875,110 @@ export default function LandAnalysis() {
               </div>
             )}
 
-            {/* SELECTED POINT BADGE */}
+            {/* SELECTED LOCATION & REVERSE GEOCODED ADDRESS CARD */}
             {clickedLocation ? (
-              <div className="rounded-lg bg-green-50 px-3.5 py-2.5 border border-green-200 text-xs">
-                <p className="font-semibold text-green-800 mb-0.5">📍 Representative Location Point</p>
-                <p className="text-green-700 font-mono text-[11px]">{clickedLocation.lat.toFixed(5)}, {clickedLocation.lng.toFixed(5)}</p>
+              <div className="rounded-lg bg-emerald-50/80 px-3.5 py-2.5 border border-emerald-200 text-xs space-y-1">
+                <div className="flex items-center justify-between">
+                  <p className="font-bold text-emerald-900 flex items-center gap-1.5">
+                    <span>📍</span>
+                    <span>Selected Parcel Location</span>
+                  </p>
+                  {isAddressLoading && (
+                    <span className="text-[10px] text-emerald-700 font-medium animate-pulse">
+                      Looking up address…
+                    </span>
+                  )}
+                </div>
+                <p className="text-emerald-950 text-xs font-semibold leading-snug">
+                  {selectedAddress || (isAddressLoading ? 'Resolving street locality…' : 'Address unlisted in open registry (Cadastral survey required)')}
+                </p>
+                <p className="text-emerald-700 font-mono text-[10px]">
+                  Coordinates: {clickedLocation.lat.toFixed(5)}, {clickedLocation.lng.toFixed(5)}
+                </p>
               </div>
             ) : (
               <div className="rounded-lg bg-amber-50 px-3.5 py-2.5 border border-amber-200 text-xs text-amber-800">
                 ⚠️ Please click on the map to select the land location.
+              </div>
+            )}
+
+            {/* ROAD ACCESS & WIDTH DETECTION CARD */}
+            {clickedLocation && (
+              <div className="rounded-lg bg-blue-50/80 px-3.5 py-2.5 border border-blue-200 text-xs space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="font-bold text-blue-900 flex items-center gap-1.5">
+                    <span>🛣️</span>
+                    <span>Abutting Road Access</span>
+                  </p>
+                  {isRoadLoading && (
+                    <span className="text-[10px] text-blue-700 font-medium animate-pulse">
+                      Detecting road…
+                    </span>
+                  )}
+                </div>
+
+                {selectedRoad?.available ? (
+                  <div className="space-y-1.5 text-slate-800">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-slate-900">{selectedRoad.road_name}</span>
+                      <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-100 text-blue-800 border border-blue-200">
+                        {selectedRoad.road_type_display}
+                      </span>
+                    </div>
+
+                    {/* Separated Values */}
+                    <div className="grid grid-cols-1 gap-1 text-[11px] pt-1 border-t border-blue-100">
+                      <div className="flex justify-between items-center">
+                        <span className="text-slate-600">Tagged Road Width:</span>
+                        <span className={`font-bold ${selectedRoad.has_tagged_width ? 'text-emerald-700' : 'text-slate-500'}`}>
+                          {selectedRoad.has_tagged_width
+                            ? `${selectedRoad.tagged_road_width_ft} ft (${selectedRoad.tagged_road_width_m} m)`
+                            : 'Road width data unavailable'}
+                        </span>
+                      </div>
+
+                      <div className="flex justify-between items-center">
+                        <span className="text-slate-600">Estimated Carriageway:</span>
+                        <span className={`font-semibold ${selectedRoad.has_estimated_carriageway ? 'text-blue-900' : 'text-slate-400'}`}>
+                          {selectedRoad.has_estimated_carriageway
+                            ? `${selectedRoad.estimated_carriageway_width_ft} ft (${selectedRoad.estimated_carriageway_width_m} m)`
+                            : 'Not available'}
+                        </span>
+                      </div>
+
+                      <div className="flex justify-between items-center">
+                        <span className="text-slate-600">Distance from Boundary:</span>
+                        <span className="font-medium text-slate-700">{selectedRoad.distance_display}</span>
+                      </div>
+                    </div>
+
+                    {/* Verification Status & TNCDBR Notice */}
+                    <div className="pt-1.5 border-t border-blue-200/60 text-[10px] space-y-0.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-500">Verification Status:</span>
+                        <span className={`font-bold px-1.5 py-0.5 rounded ${
+                          selectedRoad.has_tagged_width
+                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                            : 'bg-amber-100 text-amber-900 border border-amber-300'
+                        }`}>
+                          {selectedRoad.has_tagged_width ? 'Verified Tagged Width' : 'Manual road-width verification required'}
+                        </span>
+                      </div>
+                      {!selectedRoad.has_tagged_width && (
+                        <p className="text-amber-800 font-medium leading-tight pt-0.5">
+                          ⚠️ Never use estimated width as verified road width for TNCDBR compliance.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ) : isRoadLoading ? (
+                  <p className="text-slate-500 text-[11px] italic">Scanning OpenStreetMap road network within 50m…</p>
+                ) : (
+                  <div className="text-amber-800 text-[11px] space-y-1">
+                    <p className="font-semibold">⚠️ No accessible road mapped within 50 m</p>
+                    <p className="text-[10px] text-amber-700">Road width data unavailable. Manual road-width verification required for TNCDBR building compliance.</p>
+                  </div>
+                )}
               </div>
             )}
 
@@ -836,8 +1040,8 @@ export default function LandAnalysis() {
                 <div>
                   <p className="text-sm font-bold text-slate-700">Address / Locality</p>
                 </div>
-                <span className="text-sm text-slate-600 font-medium text-right max-w-[50%]">
-                  {gisData.address || <span className="text-slate-400">Coordinates ({gisData.lat?.toFixed(4)}, {gisData.lng?.toFixed(4)})</span>}
+                <span className="text-sm text-slate-700 font-medium text-right max-w-[55%]">
+                  {gisData.address || <span className="text-slate-400">Address unlisted in open registry (Cadastral survey required)</span>}
                 </span>
               </div>
 
@@ -887,29 +1091,100 @@ export default function LandAnalysis() {
                 )}
               </div>
 
-              <div className="flex justify-between items-center py-3 border-b border-slate-100">
+              <div className="flex justify-between items-start py-3 border-b border-slate-100">
                 <div>
-                  <p className="text-sm font-bold text-slate-700">Road Access Width</p>
+                  <p className="text-sm font-bold text-slate-700">Abutting Road Access</p>
+                  <p className="text-[11px] text-slate-400">Frontage access & verified statutory corridor</p>
                 </div>
-                <span className="text-sm text-slate-600 font-medium">
-                  {gisData.road_width
-                    ? `${gisData.road_width} ft${gisData.is_road_width_estimated ? ' (Estimated)' : ''}`
-                    : 'Width data unavailable (evaluated via OSM topology)'}
-                </span>
+                <div className="text-right space-y-1">
+                  <div>
+                    <span className="text-xs text-slate-500">Tagged Road Width: </span>
+                    <span className={`text-sm font-bold ${gisData.has_tagged_width ? 'text-emerald-700' : 'text-slate-500'}`}>
+                      {gisData.has_tagged_width
+                        ? `${gisData.tagged_road_width_ft} ft (${gisData.tagged_road_width_m} m)`
+                        : 'Road width data unavailable'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-xs text-slate-500">Estimated Carriageway: </span>
+                    <span className={`text-xs font-semibold ${gisData.has_estimated_carriageway ? 'text-blue-900' : 'text-slate-400'}`}>
+                      {gisData.has_estimated_carriageway
+                        ? `${gisData.estimated_carriageway_width_ft} ft (${gisData.estimated_carriageway_width_m} m) [from lane count]`
+                        : 'Not available'}
+                    </span>
+                  </div>
+                  {gisData.road_name && (
+                    <span className="text-[11px] text-blue-700 font-semibold block">
+                      {gisData.road_name} {gisData.road_type_display ? `(${gisData.road_type_display})` : ''}
+                    </span>
+                  )}
+                  {gisData.road_distance_display && (
+                    <span className="text-[10px] text-slate-500 block">
+                      Distance: {gisData.road_distance_display}
+                    </span>
+                  )}
+                  <div className="pt-0.5">
+                    <span className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded ${
+                      gisData.has_tagged_width
+                        ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                        : 'bg-amber-100 text-amber-900 border border-amber-300'
+                    }`}>
+                      {gisData.has_tagged_width ? 'Verified Tagged Width' : 'Manual road-width verification required'}
+                    </span>
+                  </div>
+                </div>
               </div>
 
               <div className="flex justify-between items-center py-3 border-b border-slate-100">
                 <div>
                   <p className="text-sm font-bold text-slate-700">Water Infrastructure</p>
+                  <p className="text-[11px] text-slate-400">Piped municipal/potable water utility</p>
                 </div>
-                <span className="text-sm text-slate-600 font-medium">{gisData.water_availability !== false ? 'Available' : 'Not Available'}</span>
+                <span className={`text-sm font-semibold ${
+                  gisData.water_availability === true
+                    ? 'text-emerald-700'
+                    : gisData.water_availability === false
+                    ? 'text-rose-700'
+                    : 'text-amber-700'
+                }`}>
+                  {gisData.water_availability === true
+                    ? 'Available'
+                    : gisData.water_availability === false
+                    ? 'Not Available'
+                    : 'Water Availability: Data Not Available'}
+                </span>
+              </div>
+
+              <div className="flex justify-between items-center py-3 border-b border-slate-100">
+                <div>
+                  <p className="text-sm font-bold text-slate-700">Nearby Water Bodies</p>
+                  <p className="text-[11px] text-slate-400">Geospatial hydrology (rivers, streams, canals)</p>
+                </div>
+                <span className="text-sm text-slate-600 font-medium text-right max-w-[55%]">
+                  {gisData.water_bodies_summary || (gisData.water_bodies?.length > 0
+                    ? gisData.water_bodies.join(', ')
+                    : 'No open water bodies mapped within 2 km')}
+                </span>
               </div>
 
               <div className="flex justify-between items-center py-3">
                 <div>
                   <p className="text-sm font-bold text-slate-700">Electricity Infrastructure</p>
+                  <p className="text-[11px] text-slate-400">Domestic grid power supply connection</p>
                 </div>
-                <span className="text-sm text-slate-600 font-medium">{gisData.electricity_availability !== false ? 'Available' : 'Not Available'}</span>
+                <span className={`text-sm font-semibold ${
+                  gisData.electricity_availability === true
+                    ? 'text-emerald-700'
+                    : gisData.electricity_availability === false
+                    ? 'text-rose-700'
+                    : 'text-amber-700'
+                }`}>
+                  {gisData.electricity_availability === true
+                    ? 'Available'
+                    : gisData.electricity_availability === false
+                    ? 'Not Available'
+                    : 'Electricity Availability: Data Not Available'}
+                </span>
               </div>
             </div>
 
@@ -1061,11 +1336,16 @@ export default function LandAnalysis() {
                       )}
                     </div>
                     <h2 className="text-xl sm:text-2xl font-black text-slate-900 mt-1">
-                      {gisData?.address ? gisData.address.split(',')[0].trim() : 'Analyzed Parcel'}
+                      {gisData?.address && !geocodeService.isAddressFallback(gisData.address)
+                        ? gisData.address.split(',')[0].trim()
+                        : 'Analyzed Parcel'}
                     </h2>
+                    <p className="text-xs text-slate-600 font-medium">
+                      📍 {gisData?.address || 'Address unlisted in open registry (Cadastral survey required)'}
+                    </p>
                     <p className="text-xs text-slate-500">
                       Area: <strong>{Number(gisData?.area_sqft || manualArea || 0).toLocaleString()} sq.ft</strong> · 
-                      Road: <strong>{gisData?.road_width ? `${gisData.road_width} ft` : 'Corridor Evaluated (Width unavailable)'}</strong> · 
+                      Road: <strong>{gisData?.has_tagged_width ? `${gisData.tagged_road_width_ft} ft (${gisData.tagged_road_width_m} m)${gisData.road_name ? ` · ${gisData.road_name}` : ''}` : (gisData?.road_name ? `${gisData.road_name} (Width unavailable · Manual verification required)` : 'Road width data unavailable')}</strong> · 
                       Soil: <strong>{gisData?.soil_type || 'Regional Taxonomy'}</strong>
                     </p>
                   </div>
@@ -1289,7 +1569,28 @@ export default function LandAnalysis() {
                           selected_building_type: selectedBuildingType,
                           area_sqft: Number(gisData?.area_sqft) || (manualArea ? parseFloat(manualArea) : 2400),
                           area_source: (gisData?.area_source || (areaInputMode === 'direct' ? 'direct_input' : 'polygon')) === 'direct_input' ? 'direct_input' : 'polygon',
-                          road_width_ft: gisData?.road_width || gisData?.road_width_ft || null,
+                          road_width_ft: gisData?.verified_road_width_ft || null,
+                          road_width_m: gisData?.verified_road_width_m || null,
+                          verified_road_width_ft: gisData?.verified_road_width_ft || null,
+                          verified_road_width_m: gisData?.verified_road_width_m || null,
+                          has_tagged_width: Boolean(gisData?.has_tagged_width),
+                          tagged_road_width_ft: gisData?.tagged_road_width_ft || null,
+                          tagged_road_width_m: gisData?.tagged_road_width_m || null,
+                          has_estimated_carriageway: Boolean(gisData?.has_estimated_carriageway),
+                          estimated_carriageway_width_ft: gisData?.estimated_carriageway_width_ft || null,
+                          estimated_carriageway_width_m: gisData?.estimated_carriageway_width_m || null,
+                          carriageway_calculation_basis: gisData?.carriageway_calculation_basis || null,
+                          width_status: gisData?.width_status || 'Road width data unavailable',
+                          verification_requirement: gisData?.verification_requirement || 'Manual road-width verification required',
+                          tncdbr_eligibility: gisData?.tncdbr_eligibility,
+                          road_name: gisData?.road_name || null,
+                          road_type: gisData?.road_type || null,
+                          road_type_display: gisData?.road_type_display || null,
+                          road_distance_meters: gisData?.road_distance_meters ?? null,
+                          road_distance_display: gisData?.road_distance_display || null,
+                          is_road_width_estimated: gisData?.is_road_width_estimated ?? false,
+                          road_confidence: gisData?.road_confidence || null,
+                          road_data_source: gisData?.road_data_source || null,
                           soil_type: gisData?.soil_type || 'Red Soil',
                           land_type: gisData?.land_type || 'Residential',
                           latitude: gisData?.lat ?? clickedLocation?.lat,

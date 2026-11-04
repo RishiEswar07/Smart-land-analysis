@@ -119,6 +119,20 @@ def generate_land_report_pdf(land: Land, analysis: Analysis, details: dict | Non
     lng_str = f"{land.longitude:.6f}" if land.longitude is not None else "N/A"
     coords_display = f"{lat_str}, {lng_str}" if (land.latitude is not None and land.longitude is not None) else "Coordinates unavailable"
 
+    water_avail = getattr(land, "water_availability", None) if land else None
+    elec_avail = getattr(land, "electricity_availability", None) if land else None
+    water_status = "Available" if water_avail is True else ("Not Available" if water_avail is False else "Data Not Available")
+    elec_status = "Available" if elec_avail is True else ("Not Available" if elec_avail is False else "Data Not Available")
+
+    road_w_val = getattr(land, "road_width", None) if land else None
+    if road_w_val is not None and float(road_w_val) > 0:
+        road_w_m = round(float(road_w_val) * 0.3048, 1)
+        road_width_str = f"{float(road_w_val):.1f} ft ({road_w_m:.1f} m)"
+        road_status_str = "Verified Tagged Width"
+    else:
+        road_width_str = "Road width data unavailable"
+        road_status_str = "Manual road-width verification required"
+
     # ---------------- 1. Property Information & Spatial Geometry ----------------
     story.append(Paragraph("1. Property Information & Geodesic Geometry", section_style))
     prop_rows = [
@@ -132,6 +146,10 @@ def generate_land_report_pdf(land: Land, analysis: Analysis, details: dict | Non
          Paragraph("Imperial Unit (Acres)", label_style), Paragraph(f"{area_acres:.4f} acres", bold_value_style)],
         [Paragraph("Area Provenance / Source", label_style), Paragraph(f"<b>{area_source_label}</b>", bold_value_style),
          Paragraph("Boundary Geometry", label_style), Paragraph(boundary_text, value_style)],
+        [Paragraph("Abutting Road Width", label_style), Paragraph(road_width_str, bold_value_style),
+         Paragraph("Road Corridor Status", label_style), Paragraph(road_status_str, value_style)],
+        [Paragraph("Water Utility Status", label_style), Paragraph(water_status, bold_value_style),
+         Paragraph("Electricity Utility Status", label_style), Paragraph(elec_status, bold_value_style)],
     ]
     prop_table = Table(prop_rows, colWidths=[3.8 * cm, 5.5 * cm, 3.8 * cm, 5.5 * cm])
     prop_table.setStyle(TableStyle([
@@ -251,10 +269,15 @@ def generate_land_report_pdf(land: Land, analysis: Analysis, details: dict | Non
             infra_s = round(float(infra_val if infra_val is not None else 75.0), 1)
         except (ValueError, TypeError):
             infra_s = 75.0
+        infra_why = (
+            "Municipal water utility and electricity power grid accessibility."
+            if (water_avail is True and elec_avail is True)
+            else "Roadway corridor and local proximity evaluated; on-site utility connection survey required."
+        )
         factors_data = [
             {"name": "Flood Safety", "score": flood_s, "impact": flood_imp, "weight": 0.35, "why_reason": "Topographic elevation baseline and river discharge hydrology modeling."},
             {"name": "Road Accessibility", "score": access_s, "impact": "Positive" if access_s >= 70 else "Moderate", "weight": 0.25, "why_reason": "Roadway corridor right-of-way width and accessibility topology."},
-            {"name": "Nearby Infrastructure", "score": infra_s, "impact": "Positive" if infra_s >= 70 else "Moderate", "weight": 0.25, "why_reason": "Municipal water utility and electricity power grid accessibility."},
+            {"name": "Nearby Infrastructure", "score": infra_s, "impact": "Positive" if infra_s >= 70 else "Moderate", "weight": 0.25, "why_reason": infra_why},
             {"name": "Terrain", "score": 90.0, "impact": "Positive", "weight": 0.05, "why_reason": "Digital elevation model baseline indicates stable geomorphic terrain."},
             {"name": "Land Use", "score": 85.0, "impact": "Positive", "weight": 0.10, "why_reason": "Satellite land cover classification and municipal zoning."},
             {"name": "Development Potential", "score": 80.0, "impact": "Positive", "weight": 0.10, "why_reason": f"Parcel area ({area_sqft:,.0f} sq.ft) adequacy and facility demand."},

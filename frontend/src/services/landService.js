@@ -21,6 +21,9 @@ const landService = {
   searchNearbyFacilities: (lat, lng, radiusKm = 5.0) =>
     api.get('/lands/nearby-facilities/search', { params: { lat, lng, radius_km: radiusKm } }).then((res) => res.data),
 
+  detectRoadAccess: (lat, lng) =>
+    api.get('/lands/road-access/detect', { params: { lat, lng } }).then((res) => res.data),
+
   getFloodRisk: (id) => api.get(`/lands/${id}/flood-risk`).then((res) => res.data),
   getPlanningRules: (id, buildingType = null) =>
     api.get(`/lands/${id}/planning-rules`, { params: buildingType ? { building_type: buildingType } : {} }).then((res) => res.data),

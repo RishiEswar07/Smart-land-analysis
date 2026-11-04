@@ -5,7 +5,11 @@ Pytest configuration and sandbox compatibility layer for Windows.
 Avoids loopback socket connections when running under sandboxed/restricted environments.
 """
 
+import os
 import sys
+
+os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-for-unit-testing-32-chars-minimum")
+os.environ.setdefault("APP_ENV", "development")
 
 if sys.platform == "win32":
     import asyncio.proactor_events
