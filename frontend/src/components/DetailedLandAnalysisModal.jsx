@@ -462,24 +462,30 @@ function DetailedLandAnalysisModalContent({
                       <span className="font-semibold text-slate-800">{prop.land_type || 'Residential'}</span>
                     </div>
                     <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
-                      <span className="text-slate-400 block text-[10px]">Water Infrastructure</span>
-                      <span className={`font-semibold ${prop.water_availability === true ? 'text-emerald-700' : prop.water_availability === false ? 'text-rose-700' : 'text-slate-700'}`}>
+                      <span className="text-slate-400 block text-[10px]">Water Availability</span>
+                      <span className={`font-semibold block ${prop.water_availability === true ? 'text-emerald-700' : prop.water_availability === false ? 'text-rose-700' : 'text-slate-700'}`}>
                         {prop.water_availability === true
                           ? 'Available'
                           : prop.water_availability === false
                           ? 'Not Available'
                           : 'Data Not Available'}
                       </span>
+                      {prop.water_availability == null && (
+                        <span className="text-[9px] text-slate-400 block">Field verification required</span>
+                      )}
                     </div>
                     <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
-                      <span className="text-slate-400 block text-[10px]">Electricity Infrastructure</span>
-                      <span className={`font-semibold ${prop.electricity_availability === true ? 'text-emerald-700' : prop.electricity_availability === false ? 'text-rose-700' : 'text-slate-700'}`}>
+                      <span className="text-slate-400 block text-[10px]">Electricity Availability</span>
+                      <span className={`font-semibold block ${prop.electricity_availability === true ? 'text-emerald-700' : prop.electricity_availability === false ? 'text-rose-700' : 'text-slate-700'}`}>
                         {prop.electricity_availability === true
                           ? 'Available'
                           : prop.electricity_availability === false
                           ? 'Not Available'
                           : 'Data Not Available'}
                       </span>
+                      {prop.electricity_availability == null && (
+                        <span className="text-[9px] text-slate-400 block">Field verification required</span>
+                      )}
                     </div>
                   </div>
 

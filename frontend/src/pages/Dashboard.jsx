@@ -115,6 +115,60 @@ export default function Dashboard() {
                 level={latest.environmental_risk ?? 'Unknown'}
                 description="Based on soil type — excavation and disturbance sensitivity."
               />
+              <div className="card-base p-4 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-base">💧</span>
+                    <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Water Availability</h4>
+                  </div>
+                  <p className="text-[11px] text-slate-500">Municipal piped utility connection</p>
+                </div>
+                <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between">
+                  <span className={`text-xs font-bold ${
+                    latest.water_availability === true
+                      ? 'text-emerald-700'
+                      : latest.water_availability === false
+                      ? 'text-rose-700'
+                      : 'text-amber-700'
+                  }`}>
+                    {latest.water_availability === true
+                      ? 'Available'
+                      : latest.water_availability === false
+                      ? 'Not Available'
+                      : 'Data Not Available'}
+                  </span>
+                  {latest.water_availability == null && (
+                    <span className="text-[10px] text-slate-400">Field verification required</span>
+                  )}
+                </div>
+              </div>
+              <div className="card-base p-4 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-base">⚡</span>
+                    <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Electricity Availability</h4>
+                  </div>
+                  <p className="text-[11px] text-slate-500">Domestic power grid connection</p>
+                </div>
+                <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between">
+                  <span className={`text-xs font-bold ${
+                    latest.electricity_availability === true
+                      ? 'text-emerald-700'
+                      : latest.electricity_availability === false
+                      ? 'text-rose-700'
+                      : 'text-amber-700'
+                  }`}>
+                    {latest.electricity_availability === true
+                      ? 'Available'
+                      : latest.electricity_availability === false
+                      ? 'Not Available'
+                      : 'Data Not Available'}
+                  </span>
+                  {latest.electricity_availability == null && (
+                    <span className="text-[10px] text-slate-400">Field verification required</span>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         </div>

@@ -771,25 +771,39 @@ const gisService = {
 
   /**
    * Fetch real nearby facilities and geodesic proximity (km) via backend proxy
+   * backed by OpenStreetMap Overpass API and server caching.
+   * Nominatim is NOT used for systematic POI scraping, adhering strictly to OSM usage policy.
    */
   async fetchNearbyFacilities(lat, lng, radiusKm = 5.0) {
     try {
       const response = await api.get('/lands/nearby-facilities/search', {
-        params: { lat, lng, radius_km: radiusKm }
+        params: { lat, lng, radius_km: radiusKm },
+        timeout: 15000,
       });
-      return response.data;
+      if (response.data) {
+        return response.data;
+      }
     } catch (error) {
-      console.warn('Nearby facilities fetch error:', error);
-      return {
-        status: 'unavailable',
-        message: 'Facility proximity service is temporarily busy. Please retry.',
-        search_radius_km: radiusKm,
-        total_facilities_found: 0,
-        total_found: 0,
-        categories: {},
-        all_facilities: []
-      };
+      console.warn('Backend nearby facilities lookup error:', error?.message);
     }
+
+    return {
+      status: 'unavailable',
+      source: 'OpenStreetMap Geospatial Service',
+      message: 'Facility proximity service is temporarily busy. Please retry shortly.',
+      search_radius_km: radiusKm,
+      total_facilities_found: 0,
+      total_found: 0,
+      categories: {
+        hospitals: [], clinics: [], pharmacies: [], schools: [], colleges: [],
+        police_stations: [], fire_stations: [], railway_stations: [], bus_stops: [],
+        bus_stands: [], banks_atms: [], supermarkets: [], commercial: [],
+        restaurants: [], fuel_stations: [], parks: [], airports: [], roads: [], water_bodies: []
+      },
+      all_facilities: [],
+      summary_counts: {},
+      disclaimer: 'Straight-line geodesic distance computed accurately via Haversine calculation.',
+    };
   }
 };
 

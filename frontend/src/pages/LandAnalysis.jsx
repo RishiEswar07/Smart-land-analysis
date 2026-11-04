@@ -136,8 +136,28 @@ export default function LandAnalysis() {
   const [isAddressLoading, setIsAddressLoading] = useState(false)
   const [selectedRoad, setSelectedRoad] = useState(savedState?.gisData?.roadDetails || null)
   const [isRoadLoading, setIsRoadLoading] = useState(false)
+  const [nearbyFacilities, setNearbyFacilities] = useState(null)
+  const [isFacilitiesLoading, setIsFacilitiesLoading] = useState(false)
+  const [facilityRadius, setFacilityRadius] = useState(5.0)
 
-  // Reverse geocode & road access detection whenever location or boundary changes
+  // Handle radius changes from map or controls
+  const handleRadiusChange = (newRadius) => {
+    setFacilityRadius(newRadius)
+    const lat = activeBoundary?.centroid?.lat || clickedLocation?.lat
+    const lng = activeBoundary?.centroid?.lng || clickedLocation?.lng
+    if (lat !== undefined && lat !== null && lng !== undefined && lng !== null) {
+      setIsFacilitiesLoading(true)
+      gisService
+        .fetchNearbyFacilities(lat, lng, newRadius)
+        .then((facData) => {
+          if (facData) setNearbyFacilities(facData)
+        })
+        .catch((err) => console.warn('Radius change error:', err))
+        .finally(() => setIsFacilitiesLoading(false))
+    }
+  }
+
+  // Reverse geocode, road access detection, and nearby facilities lookup whenever location or boundary changes
   useEffect(() => {
     const lat = activeBoundary?.centroid?.lat || clickedLocation?.lat
     const lng = activeBoundary?.centroid?.lng || clickedLocation?.lng
@@ -145,6 +165,7 @@ export default function LandAnalysis() {
       let isSubscribed = true
       setIsAddressLoading(true)
       setIsRoadLoading(true)
+      setIsFacilitiesLoading(true)
 
       // 1. Geocode locality address
       geocodeService
@@ -208,11 +229,26 @@ export default function LandAnalysis() {
           if (isSubscribed) setIsRoadLoading(false)
         })
 
+      // 3. Fetch verified nearby essential facilities
+      gisService
+        .fetchNearbyFacilities(lat, lng, facilityRadius)
+        .then((facData) => {
+          if (isSubscribed && facData) {
+            setNearbyFacilities(facData)
+          }
+        })
+        .catch((err) => {
+          console.warn("Facilities lookup notice:", err)
+        })
+        .finally(() => {
+          if (isSubscribed) setIsFacilitiesLoading(false)
+        })
+
       return () => {
         isSubscribed = false
       }
     }
-  }, [clickedLocation?.lat, clickedLocation?.lng, activeBoundary?.centroid?.lat, activeBoundary?.centroid?.lng, activeBoundary?.coords])
+  }, [clickedLocation?.lat, clickedLocation?.lng, activeBoundary?.centroid?.lat, activeBoundary?.centroid?.lng, activeBoundary?.coords, facilityRadius])
 
   // Non-blocking background ping on mount to wake Render container
   useEffect(() => {
@@ -774,6 +810,9 @@ export default function LandAnalysis() {
               flyToCenter={searchTarget}
               drawable={areaInputMode === 'polygon'}
               height="640px"
+              facilityMarkers={nearbyFacilities?.all_facilities || []}
+              facilityRadius={facilityRadius}
+              onRadiusChange={handleRadiusChange}
             />
           </div>
 
@@ -1137,22 +1176,27 @@ export default function LandAnalysis() {
 
               <div className="flex justify-between items-center py-3 border-b border-slate-100">
                 <div>
-                  <p className="text-sm font-bold text-slate-700">Water Infrastructure</p>
-                  <p className="text-[11px] text-slate-400">Piped municipal/potable water utility</p>
+                  <p className="text-sm font-bold text-slate-700">Water Availability</p>
+                  <p className="text-[11px] text-slate-400">Municipal piped potable water connection</p>
                 </div>
-                <span className={`text-sm font-semibold ${
-                  gisData.water_availability === true
-                    ? 'text-emerald-700'
-                    : gisData.water_availability === false
-                    ? 'text-rose-700'
-                    : 'text-amber-700'
-                }`}>
-                  {gisData.water_availability === true
-                    ? 'Available'
-                    : gisData.water_availability === false
-                    ? 'Not Available'
-                    : 'Water Availability: Data Not Available'}
-                </span>
+                <div className="text-right">
+                  <span className={`text-sm font-semibold ${
+                    gisData.water_availability === true
+                      ? 'text-emerald-700'
+                      : gisData.water_availability === false
+                      ? 'text-rose-700'
+                      : 'text-amber-700'
+                  }`}>
+                    {gisData.water_availability === true
+                      ? 'Available'
+                      : gisData.water_availability === false
+                      ? 'Not Available'
+                      : 'Data Not Available'}
+                  </span>
+                  {gisData.water_availability === null && (
+                    <p className="text-[10px] text-slate-400">Field verification required</p>
+                  )}
+                </div>
               </div>
 
               <div className="flex justify-between items-center py-3 border-b border-slate-100">
@@ -1167,24 +1211,91 @@ export default function LandAnalysis() {
                 </span>
               </div>
 
-              <div className="flex justify-between items-center py-3">
+              <div className="flex justify-between items-center py-3 border-b border-slate-100">
                 <div>
-                  <p className="text-sm font-bold text-slate-700">Electricity Infrastructure</p>
+                  <p className="text-sm font-bold text-slate-700">Electricity Availability</p>
                   <p className="text-[11px] text-slate-400">Domestic grid power supply connection</p>
                 </div>
-                <span className={`text-sm font-semibold ${
-                  gisData.electricity_availability === true
-                    ? 'text-emerald-700'
-                    : gisData.electricity_availability === false
-                    ? 'text-rose-700'
-                    : 'text-amber-700'
-                }`}>
-                  {gisData.electricity_availability === true
-                    ? 'Available'
-                    : gisData.electricity_availability === false
-                    ? 'Not Available'
-                    : 'Electricity Availability: Data Not Available'}
-                </span>
+                <div className="text-right">
+                  <span className={`text-sm font-semibold ${
+                    gisData.electricity_availability === true
+                      ? 'text-emerald-700'
+                      : gisData.electricity_availability === false
+                      ? 'text-rose-700'
+                      : 'text-amber-700'
+                  }`}>
+                    {gisData.electricity_availability === true
+                      ? 'Available'
+                      : gisData.electricity_availability === false
+                      ? 'Not Available'
+                      : 'Data Not Available'}
+                  </span>
+                  {gisData.electricity_availability === null && (
+                    <p className="text-[10px] text-slate-400">Field verification required</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Nearby Essential Facilities Preview Section */}
+              <div className="py-3">
+                <div className="flex items-center justify-between mb-2">
+                  <div>
+                    <p className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                      <span>📍</span>
+                      <span>Nearby Essential Facilities</span>
+                    </p>
+                    <p className="text-[11px] text-slate-500">
+                      Geodesic proximity ({facilityRadius} km radius)
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg border border-slate-200">
+                    {[5.0, 10.0].map((r) => (
+                      <button
+                        key={r}
+                        type="button"
+                        onClick={() => handleRadiusChange(r)}
+                        className={`px-2 py-0.5 text-[10px] font-bold rounded transition-colors ${
+                          facilityRadius === r
+                            ? 'bg-blue-600 text-white shadow-xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        {r} km
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {isFacilitiesLoading ? (
+                  <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-center text-xs text-slate-600 animate-pulse">
+                    Retrieving verified infrastructure within {facilityRadius} km…
+                  </div>
+                ) : nearbyFacilities?.total_found > 0 ? (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                    {[
+                      { icon: '🚌', label: 'Transit / Bus', count: (nearbyFacilities.categories?.bus_stops || nearbyFacilities.bus_stops || []).length },
+                      { icon: '🚆', label: 'Railways', count: (nearbyFacilities.categories?.railway_stations || nearbyFacilities.railway_stations || []).length },
+                      { icon: '🏥', label: 'Healthcare', count: (nearbyFacilities.categories?.hospitals || nearbyFacilities.hospitals || []).length },
+                      { icon: '🏫', label: 'Schools', count: (nearbyFacilities.categories?.schools || nearbyFacilities.schools || []).length },
+                      { icon: '🎓', label: 'Colleges', count: (nearbyFacilities.categories?.colleges || nearbyFacilities.colleges || []).length },
+                      { icon: '🛒', label: 'Commercial', count: (nearbyFacilities.categories?.supermarkets || nearbyFacilities.commercial || []).length },
+                      { icon: '👮', label: 'Police', count: (nearbyFacilities.categories?.police_stations || nearbyFacilities.police_stations || []).length },
+                      { icon: '✈️', label: 'Airports', count: (nearbyFacilities.categories?.airports || nearbyFacilities.airports || []).length },
+                    ].map((cat, cIdx) => (
+                      <div key={cIdx} className="bg-slate-50 p-2 rounded-lg border border-slate-100 flex items-center justify-between text-xs">
+                        <span className="flex items-center gap-1 text-slate-700 truncate">
+                          <span>{cat.icon}</span>
+                          <span className="truncate">{cat.label}</span>
+                        </span>
+                        <strong className="text-blue-700 font-mono ml-1">{cat.count}</strong>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-500 bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                    No facilities identified within {facilityRadius} km radius.
+                  </p>
+                )}
               </div>
             </div>
 

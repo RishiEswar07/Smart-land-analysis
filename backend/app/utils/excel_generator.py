@@ -111,8 +111,8 @@ def generate_land_report_excel(land: Land, analysis: Analysis, details: dict) ->
         ("Road Verification Status", rw_status),
         ("Soil Taxonomy", soil_val),
         ("Zoning / Land Type", land_type_val),
-        ("Water Utility Status", water_status),
-        ("Electricity Utility Status", elec_status),
+        ("Water Availability", water_status),
+        ("Electricity Availability", elec_status),
     ]
 
     for idx, (label, val) in enumerate(prop_rows, start=5):

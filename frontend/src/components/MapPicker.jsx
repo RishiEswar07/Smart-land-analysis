@@ -19,7 +19,7 @@ export const MAP_LAYERS = {
     id: 'satellite',
     name: 'Satellite',
     icon: '🛰️',
-    attribution: 'Esri, Maxar, Earthstar Geographics',
+    attribution: 'Esri, Maxar, Earthstar Geographics, CARTO',
     style: {
       version: 8,
       sources: {
@@ -32,6 +32,35 @@ export const MAP_LAYERS = {
           maxzoom: 18,
           attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
         },
+        'satellite-transportation': {
+          type: 'raster',
+          tiles: [
+            'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',
+          ],
+          tileSize: 256,
+          maxzoom: 18,
+          attribution: 'Transportation &copy; Esri',
+        },
+        'satellite-reference': {
+          type: 'raster',
+          tiles: [
+            'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+          ],
+          tileSize: 256,
+          maxzoom: 18,
+          attribution: 'Reference &copy; Esri',
+        },
+        'carto-labels': {
+          type: 'raster',
+          tiles: [
+            'https://a.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}.png',
+            'https://b.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}.png',
+            'https://c.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}.png',
+          ],
+          tileSize: 256,
+          maxzoom: 19,
+          attribution: '&copy; CARTO',
+        },
       },
       layers: [
         {
@@ -39,6 +68,27 @@ export const MAP_LAYERS = {
           type: 'raster',
           source: 'satellite-tiles',
           minzoom: 0,
+          maxzoom: 22,
+        },
+        {
+          id: 'satellite-transportation-layer',
+          type: 'raster',
+          source: 'satellite-transportation',
+          minzoom: 8,
+          maxzoom: 22,
+        },
+        {
+          id: 'satellite-reference-layer',
+          type: 'raster',
+          source: 'satellite-reference',
+          minzoom: 8,
+          maxzoom: 22,
+        },
+        {
+          id: 'satellite-street-labels',
+          type: 'raster',
+          source: 'carto-labels',
+          minzoom: 11,
           maxzoom: 22,
         },
       ],
@@ -52,24 +102,40 @@ export const MAP_LAYERS = {
     style: {
       version: 8,
       sources: {
-        'carto-tiles': {
+        'osm-tiles': {
           type: 'raster',
           tiles: [
-            'https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png',
-            'https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png',
-            'https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png',
+            'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
           ],
           tileSize: 256,
           maxzoom: 19,
-          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, &copy; <a href="https://carto.com/attributions">CARTO</a>',
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        },
+        'carto-labels': {
+          type: 'raster',
+          tiles: [
+            'https://a.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}.png',
+            'https://b.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}.png',
+            'https://c.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}.png',
+          ],
+          tileSize: 256,
+          maxzoom: 19,
+          attribution: '&copy; CARTO',
         },
       },
       layers: [
         {
-          id: 'street-layer',
+          id: 'street-base-layer',
           type: 'raster',
-          source: 'carto-tiles',
+          source: 'osm-tiles',
           minzoom: 0,
+          maxzoom: 22,
+        },
+        {
+          id: 'street-label-layer',
+          type: 'raster',
+          source: 'carto-labels',
+          minzoom: 10,
           maxzoom: 22,
         },
       ],
@@ -79,7 +145,7 @@ export const MAP_LAYERS = {
     id: 'terrain',
     name: 'Terrain Topo',
     icon: '⛰️',
-    attribution: 'Esri, USGS, NOAA',
+    attribution: 'Esri, USGS, NOAA, CARTO',
     style: {
       version: 8,
       sources: {
@@ -92,6 +158,17 @@ export const MAP_LAYERS = {
           maxzoom: 18,
           attribution: 'Tiles &copy; Esri &mdash; Sources: GEBCO, NOAA, CHS, OSU, UNH, CSUMB, National Geographic, DeLorme, NAVTEQ, and Esri',
         },
+        'terrain-labels': {
+          type: 'raster',
+          tiles: [
+            'https://a.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}.png',
+            'https://b.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}.png',
+            'https://c.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}.png',
+          ],
+          tileSize: 256,
+          maxzoom: 19,
+          attribution: '&copy; CARTO',
+        },
       },
       layers: [
         {
@@ -99,6 +176,13 @@ export const MAP_LAYERS = {
           type: 'raster',
           source: 'terrain-tiles',
           minzoom: 0,
+          maxzoom: 22,
+        },
+        {
+          id: 'terrain-label-layer',
+          type: 'raster',
+          source: 'terrain-labels',
+          minzoom: 11,
           maxzoom: 22,
         },
       ],
@@ -162,6 +246,11 @@ export default function MapPicker({
   activeLandIndex = 0,
   onActiveLandChange = null,
   onMultiLandChange = null,
+  // Nearby Facilities props
+  facilityMarkers = [],
+  facilityRadius = 5.0,
+  onRadiusChange = null,
+  showFacilities = true,
 }) {
   const mapRef = useRef(null)
   const containerRef = useRef(null)
@@ -172,6 +261,20 @@ export default function MapPicker({
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [isPanelCollapsed, setIsPanelCollapsed] = useState(false)
   const [isMapLoading, setIsMapLoading] = useState(false)
+
+  // Nearby facility marker interaction state
+  const [selectedFacility, setSelectedFacility] = useState(null)
+  const [showFacilityMarkers, setShowFacilityMarkers] = useState(showFacilities)
+
+  // Sync facility visibility with parent prop
+  useEffect(() => {
+    setShowFacilityMarkers(showFacilities)
+  }, [showFacilities])
+
+  // Clear selected facility popup when clicked location changes
+  useEffect(() => {
+    setSelectedFacility(null)
+  }, [clickedLocation?.lat, clickedLocation?.lng, activeBoundary?.centroid?.lat, activeBoundary?.centroid?.lng])
 
   // Drawing & editing state
   const [isDrawing, setIsDrawing] = useState(false)
@@ -597,6 +700,43 @@ export default function MapPicker({
           <span>{isFullscreen ? '✕' : '⛶'}</span>
           <span className="hidden sm:inline">{isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}</span>
         </button>
+
+        {/* Nearby Facilities Marker Pill / Toggle */}
+        {facilityMarkers && facilityMarkers.length > 0 && (
+          <div className="pointer-events-auto flex items-center bg-white/95 backdrop-blur-md rounded-xl border border-slate-200 shadow-md p-0.5 text-xs">
+            <button
+              type="button"
+              onClick={() => setShowFacilityMarkers(!showFacilityMarkers)}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-bold transition-all ${
+                showFacilityMarkers
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-slate-700 hover:bg-slate-100'
+              }`}
+              title="Toggle nearby essential facilities on map"
+            >
+              <span>📍</span>
+              <span>{facilityMarkers.length} Facilities</span>
+            </button>
+            {onRadiusChange && (
+              <div className="flex items-center gap-0.5 border-l border-slate-200 pl-1 ml-0.5">
+                {[5.0, 10.0].map((r) => (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() => onRadiusChange(r)}
+                    className={`px-1.5 py-1 rounded text-[10px] font-bold transition-colors ${
+                      facilityRadius === r
+                        ? 'bg-blue-100 text-blue-700 font-black'
+                        : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    {r}k
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* ---------------- 2. MAP CANVAS ---------------- */}
@@ -773,6 +913,81 @@ export default function MapPicker({
                   <span className="absolute -top-6 left-1/2 -translate-x-1/2 bg-slate-900/90 text-white text-[10px] font-bold px-2 py-0.5 rounded shadow pointer-events-none whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity">
                     Selected Location
                   </span>
+                </div>
+              </Marker>
+            )}
+
+            {/* NEARBY ESSENTIAL FACILITY MARKERS */}
+            {showFacilityMarkers &&
+              !isDrawing &&
+              facilityMarkers.map((fac, idx) => {
+                if (fac.lat == null || fac.lng == null) return null
+                const isSelected = selectedFacility?.id === fac.id
+                return (
+                  <Marker
+                    key={fac.id || `fac-${idx}`}
+                    longitude={fac.lng}
+                    latitude={fac.lat}
+                    anchor="center"
+                  >
+                    <div
+                      className={`relative cursor-pointer transition-all duration-150 transform hover:scale-125 ${
+                        isSelected ? 'scale-125 z-30' : 'z-10'
+                      }`}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setSelectedFacility(isSelected ? null : fac)
+                      }}
+                      title={`${fac.name} (${fac.category}) • ${fac.distance_display || `${fac.distance_km} km`}`}
+                    >
+                      <div className="w-7 h-7 rounded-full bg-white border-2 border-blue-600 shadow-md flex items-center justify-center text-xs hover:border-blue-700 hover:shadow-lg">
+                        <span>{fac.icon || '📍'}</span>
+                      </div>
+                    </div>
+                  </Marker>
+                )
+              })}
+
+            {/* POPUP FOR SELECTED FACILITY */}
+            {selectedFacility && selectedFacility.lat && selectedFacility.lng && (
+              <Marker
+                longitude={selectedFacility.lng}
+                latitude={selectedFacility.lat}
+                anchor="bottom"
+                offset={[0, -18]}
+              >
+                <div
+                  className="bg-white rounded-xl shadow-2xl border border-slate-200 p-3 w-60 text-xs text-slate-800 animate-fadeIn z-40 pointer-events-auto"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-start justify-between gap-1.5 mb-1.5">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="text-base shrink-0">{selectedFacility.icon || '📍'}</span>
+                      <strong className="text-slate-900 font-bold leading-tight truncate">
+                        {selectedFacility.name}
+                      </strong>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedFacility(null)}
+                      className="text-slate-400 hover:text-slate-700 text-sm font-bold p-0.5 leading-none shrink-0"
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <div className="flex items-center justify-between text-[11px] pt-1 border-t border-slate-100">
+                    <span className="text-blue-700 font-semibold bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200/50">
+                      {selectedFacility.category}
+                    </span>
+                    <span className="font-mono font-bold text-slate-700">
+                      {selectedFacility.distance_display || `${selectedFacility.distance_km} km`}
+                    </span>
+                  </div>
+                  {selectedFacility.address && (
+                    <p className="text-[10px] text-slate-400 mt-1 line-clamp-2 leading-tight">
+                      {selectedFacility.address}
+                    </p>
+                  )}
                 </div>
               </Marker>
             )}

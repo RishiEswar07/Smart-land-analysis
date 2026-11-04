@@ -40,7 +40,7 @@ OVERPASS_ENDPOINTS = [
     "https://overpass-api.de/api/interpreter",
     "https://lz4.overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
-    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
 ]
 
 # In-memory cache keyed by (lat_4dec, lng_4dec, radius_km)
@@ -143,146 +143,19 @@ def _format_address(tags: Dict[str, str]) -> Optional[str]:
     return ", ".join(parts) if parts else None
 
 
-async def _query_single_nominatim_term(
-    client: httpx.AsyncClient,
-    sem: asyncio.Semaphore,
-    term: str,
-    cat_label: str,
-    cat_key: str,
-    viewbox: str,
-    lat: float,
-    lng: float,
-    radius_km: float,
-    headers: Dict[str, str],
-) -> List[Dict[str, Any]]:
-    """Helper to query a single term in OpenStreetMap Nominatim within viewbox with retries."""
-    found: List[Dict[str, Any]] = []
-    url = f"https://nominatim.openstreetmap.org/search?q={term}&format=json&bounded=1&viewbox={viewbox}&limit=8"
-    max_allowed_dist = 50.0 if cat_key == "airports" else (radius_km * 1.25)
-    meta = FACILITY_CATEGORY_META.get(cat_key, {"label": cat_label, "icon": "📍"})
-
-    async with sem:
-        for attempt in range(2):
-            try:
-                resp = await client.get(url, headers=headers)
-                if resp.status_code == 200:
-                    for it in resp.json():
-                        try:
-                            it_lat = float(it.get("lat", 0))
-                            it_lon = float(it.get("lon", 0))
-                        except (TypeError, ValueError):
-                            continue
-
-                        d_km = haversine_distance_km(lat, lng, it_lat, it_lon)
-                        if d_km <= max_allowed_dist:
-                            raw_name = it.get("display_name", "").split(",")[0].strip()
-                            name = raw_name or term.title()
-                            d_meters = round(d_km * 1000)
-                            d_display = f"{d_meters} m" if d_km < 1.0 else f"{d_km:.2f} km"
-                            osm_id = it.get("osm_id") or it.get("place_id") or f"{it_lat}-{it_lon}"
-                            osm_type = it.get("osm_type", "node")
-                            found.append({
-                                "id": f"{osm_type}/{osm_id}",
-                                "name": name,
-                                "category": meta["label"],
-                                "cat_key": cat_key,
-                                "icon": meta["icon"],
-                                "distance_km": d_km,
-                                "distanceKm": d_km,
-                                "distance_meters": d_meters,
-                                "distance_display": d_display,
-                                "address": it.get("display_name"),
-                                "lat": it_lat,
-                                "lng": it_lon,
-                                "status": "Verified Proximity",
-                                "osm_type": osm_type,
-                                "osm_id": osm_id,
-                            })
-                    break
-                elif resp.status_code == 429 and attempt == 0:
-                    await asyncio.sleep(0.5)
-                else:
-                    break
-            except Exception as exc:
-                logger.debug(f"Nominatim lookup error for '{term}': {exc}")
-                if attempt == 0:
-                    await asyncio.sleep(0.3)
-            await asyncio.sleep(0.08)
-
-    return found
-
-
 async def _fetch_from_nominatim_fallback(
     lat: float, lng: float, radius_km: float
 ) -> Dict[str, List[Dict[str, Any]]]:
     """
-    High-reliability fallback: Queries OpenStreetMap Nominatim search
-    bounded by the search bounding box when Overpass mirrors encounter timeouts or rate limits.
+    Nominatim API Compliance Shim:
+    In strict compliance with OpenStreetMap Nominatim Acceptable Use Policy,
+    systematic POI querying via Nominatim is completely disabled. Nominatim
+    is reserved exclusively for single-address forward and reverse geocoding.
+    Returns an empty category structure.
     """
-    delta_lat = radius_km / 111.0
-    delta_lng = radius_km / (111.0 * max(0.1, math.cos(math.radians(lat))))
-    min_lng = lng - delta_lng
-    max_lng = lng + delta_lng
-    min_lat = lat - delta_lat
-    max_lat = lat + delta_lat
-    viewbox_local = f"{min_lng:.5f},{max_lat:.5f},{max_lng:.5f},{min_lat:.5f}"
-
-    # Expanded viewbox for regional transit infrastructure (Airports)
-    transit_r_km = max(radius_km, 35.0)
-    delta_lat_t = transit_r_km / 111.0
-    delta_lng_t = transit_r_km / (111.0 * max(0.1, math.cos(math.radians(lat))))
-    viewbox_transit = f"{lng - delta_lng_t:.5f},{lat + delta_lat_t:.5f},{lng + delta_lng_t:.5f},{lat - delta_lat_t:.5f}"
-
-    queries = {
-        "hospitals": [("hospital", "Hospital"), ("government hospital", "Hospital")],
-        "clinics": [("clinic", "Clinic"), ("doctor", "Healthcare Clinic")],
-        "pharmacies": [("pharmacy", "Pharmacy"), ("chemist", "Pharmacy")],
-        "schools": [("school", "School"), ("higher secondary school", "School")],
-        "colleges": [("college", "College"), ("university", "University")],
-        "police_stations": [("police station", "Police Station")],
-        "fire_stations": [("fire station", "Fire Station")],
-        "railway_stations": [("railway station", "Railway Station")],
-        "bus_stops": [("bus station", "Bus Station"), ("bus stop", "Bus Stop")],
-        "banks_atms": [("bank", "Bank"), ("atm", "ATM")],
-        "supermarkets": [("supermarket", "Supermarket"), ("shopping mall", "Shopping Mall")],
-        "restaurants": [("restaurant", "Restaurant"), ("hotel food", "Restaurant")],
-        "fuel_stations": [("petrol bunk", "Fuel Station"), ("fuel station", "Fuel Station")],
-        "parks": [("park", "Public Park"), ("garden", "Public Garden")],
-        "airports": [("airport", "Airport / Aviation")],
-        "roads": [("Main Road", "Road Network"), ("Salai", "Road Network")],
-        "water_bodies": [("river", "Hydrology / River"), ("lake", "Hydrology / Water Body")],
-    }
-
-    headers = {
-        "User-Agent": "SmartLandAnalysis/2.0 (Academic Geospatial Research; contact@smartland.edu)"
-    }
     results: Dict[str, List[Dict[str, Any]]] = {k: [] for k in FACILITY_CATEGORY_META}
     results["bus_stands"] = []
     results["commercial"] = []
-    sem = asyncio.Semaphore(4)
-
-    tasks = []
-    async with httpx.AsyncClient(timeout=7.0) as client:
-        for cat_key, term_list in queries.items():
-            vb = viewbox_transit if cat_key == "airports" else viewbox_local
-            for term, cat_label in term_list:
-                tasks.append(
-                    _query_single_nominatim_term(
-                        client, sem, term, cat_label, cat_key, vb, lat, lng, radius_km, headers
-                    )
-                )
-
-        gathered_results = await asyncio.gather(*tasks, return_exceptions=True)
-        for res in gathered_results:
-            if isinstance(res, list):
-                for item in res:
-                    c_key = item.get("cat_key")
-                    if c_key in results:
-                        results[c_key].append(item)
-
-    # Aliases
-    results["bus_stands"] = results.get("bus_stops", [])
-    results["commercial"] = results.get("supermarkets", [])
     return results
 
 
@@ -293,7 +166,7 @@ async def _execute_fetch(
 ) -> Dict[str, Any]:
     """Internal implementation of comprehensive geospatial facility lookup."""
     local_m = int(radius_km * 1000)
-    transit_radius_m = int(max(local_m, 35000))
+    transit_radius_m = local_m
     bus_stop_m = int(min(local_m, 4000))
 
     query = f"""
@@ -350,10 +223,10 @@ async def _execute_fetch(
     source = "Geospatial Overpass Engine"
     overpass_succeeded = False
 
-    for endpoint in OVERPASS_ENDPOINTS[:3]:
+    for endpoint in OVERPASS_ENDPOINTS:
         try:
             logger.info(f"Connecting to Overpass endpoint: {endpoint}")
-            async with httpx.AsyncClient(timeout=7.0) as client:
+            async with httpx.AsyncClient(timeout=6.0) as client:
                 resp = await client.post(endpoint, data={"data": query}, headers=headers)
                 if resp.status_code == 200:
                     data = resp.json()
@@ -380,9 +253,8 @@ async def _execute_fetch(
                 continue
 
             dist_km = haversine_distance_km(lat, lng, elem_lat, elem_lon)
-            # Skip items beyond requested search radius (except regional airports)
-            is_airport = "aeroway" in tags
-            if not is_airport and dist_km > (radius_km * 1.05):
+            # Strictly filter all items beyond requested search radius (including airports and regional transit)
+            if dist_km > radius_km:
                 continue
 
             addr = _format_address(tags)
@@ -518,10 +390,10 @@ async def _execute_fetch(
                         categories[cat_key].extend(items)
             categories["bus_stands"] = categories.get("bus_stops", [])
             categories["commercial"] = categories.get("supermarkets", [])
-            if not overpass_succeeded or total_parsed == 0:
-                source = "Geospatial Proximity Service (Nominatim OSM)"
+            if overpass_succeeded:
+                source = "Geospatial Overpass Engine"
             else:
-                source = "Hybrid Geospatial Service (Overpass + Nominatim)"
+                source = "OpenStreetMap Geospatial Service"
         except Exception as exc:
             logger.warning(f"Secondary fallback error: {exc}")
 

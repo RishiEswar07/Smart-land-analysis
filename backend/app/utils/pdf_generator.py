@@ -148,8 +148,8 @@ def generate_land_report_pdf(land: Land, analysis: Analysis, details: dict | Non
          Paragraph("Boundary Geometry", label_style), Paragraph(boundary_text, value_style)],
         [Paragraph("Abutting Road Width", label_style), Paragraph(road_width_str, bold_value_style),
          Paragraph("Road Corridor Status", label_style), Paragraph(road_status_str, value_style)],
-        [Paragraph("Water Utility Status", label_style), Paragraph(water_status, bold_value_style),
-         Paragraph("Electricity Utility Status", label_style), Paragraph(elec_status, bold_value_style)],
+        [Paragraph("Water Availability", label_style), Paragraph(water_status, bold_value_style),
+         Paragraph("Electricity Availability", label_style), Paragraph(elec_status, bold_value_style)],
     ]
     prop_table = Table(prop_rows, colWidths=[3.8 * cm, 5.5 * cm, 3.8 * cm, 5.5 * cm])
     prop_table.setStyle(TableStyle([

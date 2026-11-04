@@ -140,6 +140,92 @@ async def test_facility_unavailable_state_on_timeout():
             assert "unavailable" in res["message"].lower() or "busy" in res["message"].lower()
 
 
+@pytest.mark.asyncio
+async def test_strict_facility_radius_filtering_and_airport_exclusion():
+    """
+    Verifies:
+    1. Facilities beyond search radius are strictly filtered out (dist_km <= radius_km).
+    2. Chennai Airport (12.8 km away) is excluded from 5 km and 10 km searches.
+    3. Chennai Airport is included in 15 km search.
+    4. 10 km search includes valid 5 km results.
+    """
+    c_lat, c_lng = 13.0827, 80.2707
+    mock_elements = [
+        # 1. Nearby hospital (~0.25 km)
+        {"type": "node", "id": 201, "lat": 13.0810, "lon": 80.2720, "tags": {"amenity": "hospital", "name": "Rajiv Gandhi Hospital"}},
+        # 2. Nearby school (~0.85 km)
+        {"type": "node", "id": 202, "lat": 13.0870, "lon": 80.2780, "tags": {"amenity": "school", "name": "St Marys High School"}},
+        # 3. Intermediate clinic (~7.2 km)
+        {"type": "node", "id": 203, "lat": 13.0300, "lon": 80.2300, "tags": {"amenity": "clinic", "name": "Kauvery Clinic"}},
+        # 4. Chennai Airport MAA (~12.8 km away)
+        {"type": "node", "id": 299, "lat": 12.9941, "lon": 80.1709, "tags": {"aeroway": "terminal", "name": "Chennai International Airport (MAA)"}},
+    ]
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"elements": mock_elements}
+
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=mock_resp):
+        # 5 km search
+        res_5k = await _execute_fetch(c_lat, c_lng, radius_km=5.0)
+        assert res_5k["status"] == "success"
+        facs_5k = res_5k["all_facilities"]
+        for f in facs_5k:
+            assert f["distance_km"] <= 5.0, f"Item {f['name']} at {f['distance_km']}km exceeds 5km!"
+            assert "Airport" not in f["name"]
+
+        # 10 km search
+        res_10k = await _execute_fetch(c_lat, c_lng, radius_km=10.0)
+        assert res_10k["status"] == "success"
+        facs_10k = res_10k["all_facilities"]
+        for f in facs_10k:
+            assert f["distance_km"] <= 10.0, f"Item {f['name']} at {f['distance_km']}km exceeds 10km!"
+            assert "Airport" not in f["name"], "Chennai Airport at 12.8km must NOT be in 10km search!"
+
+        # 10 km must contain 5 km items
+        ids_5k = {f["id"] for f in facs_5k}
+        ids_10k = {f["id"] for f in facs_10k}
+        assert ids_5k.issubset(ids_10k)
+
+        # 15 km search
+        res_15k = await _execute_fetch(c_lat, c_lng, radius_km=15.0)
+        assert res_15k["status"] == "success"
+        facs_15k = res_15k["all_facilities"]
+        airport_found = any("Airport" in f["name"] for f in facs_15k)
+        assert airport_found, "Chennai Airport should be included when radius is 15 km"
+
+
+@pytest.mark.asyncio
+async def test_facility_deduplication():
+    """Verifies that elements with identical OSM IDs or duplicate names/coordinates are deduplicated."""
+    mock_elements = [
+        {"type": "node", "id": 501, "lat": 13.0827, "lon": 80.2707, "tags": {"amenity": "hospital", "name": "Apollo Clinic"}},
+        {"type": "node", "id": 501, "lat": 13.0827, "lon": 80.2707, "tags": {"amenity": "hospital", "name": "Apollo Clinic"}},
+        {"type": "node", "id": 502, "lat": 13.0827, "lon": 80.2707, "tags": {"amenity": "hospital", "name": "Apollo Clinic"}},
+    ]
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"elements": mock_elements}
+
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=mock_resp):
+        res = await _execute_fetch(13.0827, 80.2707, radius_km=5.0)
+        hospitals = res["categories"]["hospitals"]
+        assert len(hospitals) == 1, f"Expected 1 deduplicated hospital, got {len(hospitals)}"
+
+
+def test_nominatim_compliance_policy():
+    """Verifies that facility_service.py and gisService.js do not execute bulk POI searches against Nominatim."""
+    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    with open(os.path.join(repo_root, "backend", "app", "services", "facility_service.py"), "r", encoding="utf-8") as f:
+        backend_content = f.read()
+    with open(os.path.join(repo_root, "frontend", "src", "services", "gisService.js"), "r", encoding="utf-8") as f:
+        frontend_content = f.read()
+
+    assert "nominatim.openstreetmap.org/search" not in backend_content
+    assert "asyncio.Semaphore(10)" not in backend_content
+    assert "nominatim.openstreetmap.org/search" not in frontend_content
+
+
 # ---------------------------------------------------------------------------
 # 3. Environmental Reliability & Missing Data Handling
 # ---------------------------------------------------------------------------
