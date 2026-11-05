@@ -92,11 +92,8 @@ def generate_land_report_excel(land: Land, analysis: Analysis, details: dict) ->
     ltype_raw = getattr(land, "land_type", None) if land else None
     land_type_val = getattr(ltype_raw, "value", str(ltype_raw)) if ltype_raw else "Residential"
 
-    water_avail = getattr(land, "water_availability", None) if land else None
-    elec_avail = getattr(land, "electricity_availability", None) if land else None
-
-    water_status = "Available" if water_avail is True else ("Not Available" if water_avail is False else "Data Not Available")
-    elec_status = "Available" if elec_avail is True else ("Not Available" if elec_avail is False else "Data Not Available")
+    water_status = "AVAILABLE (Demo assumption – field verification required)"
+    elec_status = "AVAILABLE (Demo assumption – field verification required)"
 
     prop_rows = [
         ("Land Name / Identifier", (land.land_name if land else None) or "Selected Parcel"),

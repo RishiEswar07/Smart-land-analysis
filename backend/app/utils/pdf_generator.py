@@ -119,10 +119,8 @@ def generate_land_report_pdf(land: Land, analysis: Analysis, details: dict | Non
     lng_str = f"{land.longitude:.6f}" if land.longitude is not None else "N/A"
     coords_display = f"{lat_str}, {lng_str}" if (land.latitude is not None and land.longitude is not None) else "Coordinates unavailable"
 
-    water_avail = getattr(land, "water_availability", None) if land else None
-    elec_avail = getattr(land, "electricity_availability", None) if land else None
-    water_status = "Available" if water_avail is True else ("Not Available" if water_avail is False else "Data Not Available")
-    elec_status = "Available" if elec_avail is True else ("Not Available" if elec_avail is False else "Data Not Available")
+    water_status = "<b><font color='#065f46'>AVAILABLE</font></b><br/><font size='7' color='#64748b'>Demo assumption – field verification required</font>"
+    elec_status = "<b><font color='#065f46'>AVAILABLE</font></b><br/><font size='7' color='#64748b'>Demo assumption – field verification required</font>"
 
     road_w_val = getattr(land, "road_width", None) if land else None
     if road_w_val is not None and float(road_w_val) > 0:
@@ -269,11 +267,7 @@ def generate_land_report_pdf(land: Land, analysis: Analysis, details: dict | Non
             infra_s = round(float(infra_val if infra_val is not None else 75.0), 1)
         except (ValueError, TypeError):
             infra_s = 75.0
-        infra_why = (
-            "Municipal water utility and electricity power grid accessibility."
-            if (water_avail is True and elec_avail is True)
-            else "Roadway corridor and local proximity evaluated; on-site utility connection survey required."
-        )
+        infra_why = "Municipal water utility and electricity power grid accessibility (Demo assumption – field verification required)."
         factors_data = [
             {"name": "Flood Safety", "score": flood_s, "impact": flood_imp, "weight": 0.35, "why_reason": "Topographic elevation baseline and river discharge hydrology modeling."},
             {"name": "Road Accessibility", "score": access_s, "impact": "Positive" if access_s >= 70 else "Moderate", "weight": 0.25, "why_reason": "Roadway corridor right-of-way width and accessibility topology."},

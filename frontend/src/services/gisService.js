@@ -778,7 +778,7 @@ const gisService = {
     try {
       const response = await api.get('/lands/nearby-facilities/search', {
         params: { lat, lng, radius_km: radiusKm },
-        timeout: 15000,
+        timeout: 25000,
       });
       if (response.data) {
         return response.data;

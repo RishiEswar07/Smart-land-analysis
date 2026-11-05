@@ -169,7 +169,14 @@ function DetailedLandAnalysisModalContent({
       const landId = prop.land_id ?? prop.id ?? data?.land_id ?? data?.property_info?.land_id
 
       if (landId) {
-        res = await landService.getNearbyFacilities(landId, radius)
+        try {
+          res = await landService.getNearbyFacilities(landId, radius)
+        } catch (landErr) {
+          console.warn('landService.getNearbyFacilities failed, falling back to coordinate search:', landErr)
+          if (lat != null && lng != null) {
+            res = await gisService.fetchNearbyFacilities(lat, lng, radius)
+          }
+        }
       } else if (lat != null && lng != null) {
         res = await gisService.fetchNearbyFacilities(lat, lng, radius)
       }
@@ -463,29 +470,17 @@ function DetailedLandAnalysisModalContent({
                     </div>
                     <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
                       <span className="text-slate-400 block text-[10px]">Water Availability</span>
-                      <span className={`font-semibold block ${prop.water_availability === true ? 'text-emerald-700' : prop.water_availability === false ? 'text-rose-700' : 'text-slate-700'}`}>
-                        {prop.water_availability === true
-                          ? 'Available'
-                          : prop.water_availability === false
-                          ? 'Not Available'
-                          : 'Data Not Available'}
+                      <span className="inline-flex items-center px-1.5 py-0.5 mt-0.5 rounded text-xs font-semibold bg-emerald-100 text-emerald-800">
+                        AVAILABLE
                       </span>
-                      {prop.water_availability == null && (
-                        <span className="text-[9px] text-slate-400 block">Field verification required</span>
-                      )}
+                      <span className="text-[9px] text-slate-400 block mt-0.5">Demo assumption – field verification required</span>
                     </div>
                     <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
                       <span className="text-slate-400 block text-[10px]">Electricity Availability</span>
-                      <span className={`font-semibold block ${prop.electricity_availability === true ? 'text-emerald-700' : prop.electricity_availability === false ? 'text-rose-700' : 'text-slate-700'}`}>
-                        {prop.electricity_availability === true
-                          ? 'Available'
-                          : prop.electricity_availability === false
-                          ? 'Not Available'
-                          : 'Data Not Available'}
+                      <span className="inline-flex items-center px-1.5 py-0.5 mt-0.5 rounded text-xs font-semibold bg-emerald-100 text-emerald-800">
+                        AVAILABLE
                       </span>
-                      {prop.electricity_availability == null && (
-                        <span className="text-[9px] text-slate-400 block">Field verification required</span>
-                      )}
+                      <span className="text-[9px] text-slate-400 block mt-0.5">Demo assumption – field verification required</span>
                     </div>
                   </div>
 

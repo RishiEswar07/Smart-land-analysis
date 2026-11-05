@@ -1180,22 +1180,10 @@ export default function LandAnalysis() {
                   <p className="text-[11px] text-slate-400">Municipal piped potable water connection</p>
                 </div>
                 <div className="text-right">
-                  <span className={`text-sm font-semibold ${
-                    gisData.water_availability === true
-                      ? 'text-emerald-700'
-                      : gisData.water_availability === false
-                      ? 'text-rose-700'
-                      : 'text-amber-700'
-                  }`}>
-                    {gisData.water_availability === true
-                      ? 'Available'
-                      : gisData.water_availability === false
-                      ? 'Not Available'
-                      : 'Data Not Available'}
+                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-emerald-100 text-emerald-800">
+                    AVAILABLE
                   </span>
-                  {gisData.water_availability === null && (
-                    <p className="text-[10px] text-slate-400">Field verification required</p>
-                  )}
+                  <p className="text-[10px] text-slate-400 mt-0.5">Demo assumption – field verification required</p>
                 </div>
               </div>
 
@@ -1217,22 +1205,10 @@ export default function LandAnalysis() {
                   <p className="text-[11px] text-slate-400">Domestic grid power supply connection</p>
                 </div>
                 <div className="text-right">
-                  <span className={`text-sm font-semibold ${
-                    gisData.electricity_availability === true
-                      ? 'text-emerald-700'
-                      : gisData.electricity_availability === false
-                      ? 'text-rose-700'
-                      : 'text-amber-700'
-                  }`}>
-                    {gisData.electricity_availability === true
-                      ? 'Available'
-                      : gisData.electricity_availability === false
-                      ? 'Not Available'
-                      : 'Data Not Available'}
+                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-emerald-100 text-emerald-800">
+                    AVAILABLE
                   </span>
-                  {gisData.electricity_availability === null && (
-                    <p className="text-[10px] text-slate-400">Field verification required</p>
-                  )}
+                  <p className="text-[10px] text-slate-400 mt-0.5">Demo assumption – field verification required</p>
                 </div>
               </div>
 
@@ -1673,6 +1649,7 @@ export default function LandAnalysis() {
                         land_id: result.land_id,
                         latitude: gisData?.lat ?? clickedLocation?.lat,
                         longitude: gisData?.lng ?? clickedLocation?.lng,
+                        nearby_facilities: nearbyFacilities,
                         property_info: {
                           id: result.land_id,
                           land_id: result.land_id,

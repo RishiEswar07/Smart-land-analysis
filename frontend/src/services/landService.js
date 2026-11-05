@@ -16,10 +16,10 @@ const landService = {
   deleteLand: (id) => api.delete(`/lands/${id}`).then((res) => res.data),
 
   getNearbyFacilities: (id, radiusKm = 5.0) =>
-    api.get(`/lands/${id}/facilities`, { params: { radius_km: radiusKm } }).then((res) => res.data),
+    api.get(`/lands/${id}/facilities`, { params: { radius_km: radiusKm }, timeout: 25000 }).then((res) => res.data),
 
   searchNearbyFacilities: (lat, lng, radiusKm = 5.0) =>
-    api.get('/lands/nearby-facilities/search', { params: { lat, lng, radius_km: radiusKm } }).then((res) => res.data),
+    api.get('/lands/nearby-facilities/search', { params: { lat, lng, radius_km: radiusKm }, timeout: 25000 }).then((res) => res.data),
 
   detectRoadAccess: (lat, lng) =>
     api.get('/lands/road-access/detect', { params: { lat, lng } }).then((res) => res.data),

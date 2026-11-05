@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 
 # Primary and fallback Overpass API endpoints (Global high-availability mirrors)
 OVERPASS_ENDPOINTS = [
+    "https://overpass.openstreetmap.fr/api/interpreter",
     "https://overpass-api.de/api/interpreter",
     "https://lz4.overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
@@ -167,56 +168,35 @@ async def _execute_fetch(
     """Internal implementation of comprehensive geospatial facility lookup."""
     local_m = int(radius_km * 1000)
     transit_radius_m = local_m
-    bus_stop_m = int(min(local_m, 4000))
+    bus_stop_m = int(min(local_m, 3000))
 
     query = f"""
-    [out:json][timeout:12];
+    [out:json][timeout:20];
     (
-      // 1. Healthcare: Hospitals, Clinics, Doctors, Pharmacies
-      nwr["amenity"~"hospital|clinic|doctors|pharmacy"](around:{local_m},{lat},{lng});
-      nwr["healthcare"~"hospital|clinic|doctor|pharmacy|centre"](around:{local_m},{lat},{lng});
-      nwr["shop"~"chemist|pharmacy"](around:{local_m},{lat},{lng});
-
-      // 2. Education: Schools, Colleges, Universities
-      nwr["amenity"~"school|college|university|kindergarten"](around:{local_m},{lat},{lng});
-
-      // 3. Emergency & Civic: Police, Fire Stations
-      nwr["amenity"~"police|fire_station"](around:{local_m},{lat},{lng});
-
-      // 4. Transit: Railway Stations, Bus Stations, Bus Stops
-      nwr["railway"~"station|halt"](around:{local_m},{lat},{lng});
-      nwr["amenity"="bus_station"](around:{local_m},{lat},{lng});
+      // Primary amenity nodes (hospitals, clinics, pharmacies, schools, colleges, police, fire, banks, food, fuel)
+      node["amenity"~"hospital|clinic|doctors|pharmacy|school|college|university|police|fire_station|bank|atm|restaurant|cafe|fuel"](around:{local_m},{lat},{lng});
+      node["railway"~"station|halt"](around:{local_m},{lat},{lng});
+      node["amenity"="bus_station"](around:{local_m},{lat},{lng});
       node["highway"="bus_stop"](around:{bus_stop_m},{lat},{lng});
-      node["public_transport"~"stop_position|platform"](around:{bus_stop_m},{lat},{lng});
+      node["shop"~"supermarket|grocery|mall|department_store|convenience|chemist|pharmacy"](around:{local_m},{lat},{lng});
+      node["leisure"~"park|garden"](around:{local_m},{lat},{lng});
+      node["aeroway"~"aerodrome|terminal"](around:{transit_radius_m},{lat},{lng});
 
-      // 5. Finance: Banks and ATMs
-      nwr["amenity"~"bank|atm"](around:{local_m},{lat},{lng});
-
-      // 6. Food & Dining: Restaurants, Cafes, Fast Food
-      nwr["amenity"~"restaurant|cafe|fast_food|food_court"](around:{local_m},{lat},{lng});
-
-      // 7. Shopping & Supermarkets
-      nwr["shop"~"supermarket|grocery|mall|department_store|convenience"](around:{local_m},{lat},{lng});
-
-      // 8. Fuel & Automotive
-      nwr["amenity"="fuel"](around:{local_m},{lat},{lng});
-
-      // 9. Parks & Recreation
-      nwr["leisure"~"park|garden|recreation_ground"](around:{local_m},{lat},{lng});
-
-      // 10. Regional transit & aviation
-      nwr["aeroway"~"aerodrome|terminal"](around:{transit_radius_m},{lat},{lng});
-
-      // 11. Roads & Water Bodies
+      // Essential way geometries with center coordinates
+      way["amenity"~"hospital|clinic|school|college|university|police|fire_station|bus_station"](around:{local_m},{lat},{lng});
+      way["shop"~"supermarket|mall|department_store"](around:{local_m},{lat},{lng});
+      way["leisure"~"park|garden"](around:{local_m},{lat},{lng});
+      way["aeroway"~"aerodrome|terminal"](around:{transit_radius_m},{lat},{lng});
       way["highway"~"motorway|trunk|primary|secondary"](around:2000,{lat},{lng});
       way["waterway"~"river|canal"](around:3000,{lat},{lng});
       way["natural"="water"](around:3000,{lat},{lng});
     );
-    out center 250;
+    out center 150;
     """
 
     headers = {
-        "User-Agent": "SmartLandAnalysis/2.0 (Academic Geospatial Research; contact@smartland.edu)",
+        "User-Agent": "SmartLandAnalysis/2.0 (contact@smartlandanalysis.edu)",
+        "Referer": "https://smartlandanalysis.edu/",
     }
 
     elements: List[Dict[str, Any]] = []
@@ -226,7 +206,7 @@ async def _execute_fetch(
     for endpoint in OVERPASS_ENDPOINTS:
         try:
             logger.info(f"Connecting to Overpass endpoint: {endpoint}")
-            async with httpx.AsyncClient(timeout=6.0) as client:
+            async with httpx.AsyncClient(timeout=25.0) as client:
                 resp = await client.post(endpoint, data={"data": query}, headers=headers)
                 if resp.status_code == 200:
                     data = resp.json()
@@ -238,7 +218,8 @@ async def _execute_fetch(
                 else:
                     logger.warning(f"Overpass endpoint {endpoint} returned status {resp.status_code}")
         except Exception as exc:
-            logger.warning(f"Overpass endpoint {endpoint} error: {exc}")
+            logger.warning(f"Overpass endpoint {endpoint} error: {repr(exc)}")
+            continue
             continue
 
     categories: Dict[str, List[Dict[str, Any]]] = {k: [] for k in FACILITY_CATEGORY_META}

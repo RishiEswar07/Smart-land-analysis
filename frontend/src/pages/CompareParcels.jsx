@@ -120,8 +120,8 @@ export default function CompareParcels() {
       ['Overall Risk Score (%)', ...parcels.map((p) => p.overall_risk_score ?? 'N/A')],
       ['Flood Risk Level', ...parcels.map((p) => p.flood_risk_level ?? 'N/A')],
       ['Soil Type', ...parcels.map((p) => p.soil_type || 'N/A')],
-      ['Water Availability', ...parcels.map((p) => (p.water_availability === true ? 'Available' : p.water_availability === false ? 'Not Available' : 'Data Not Available'))],
-      ['Electricity Availability', ...parcels.map((p) => (p.electricity_availability === true ? 'Available' : p.electricity_availability === false ? 'Not Available' : 'Data Not Available'))],
+      ['Water Availability', ...parcels.map(() => 'AVAILABLE (Demo assumption – field verification required)')],
+      ['Electricity Availability', ...parcels.map(() => 'AVAILABLE (Demo assumption – field verification required)')],
       ['TNCDBR Base FSI', ...parcels.map((p) => p.planning_rules?.base_fsi || 'N/A')],
       ['Max Gross Floor Area (sq.ft)', ...parcels.map((p) => p.planning_rules?.theoretical_max_floor_area_sqft || 'N/A')],
       ['Front Setback (ft)', ...parcels.map((p) => p.planning_rules?.front_setback_ft?.toFixed(1) || 'N/A')],
@@ -731,26 +731,28 @@ export default function CompareParcels() {
                     })}
                   </tr>
                   <tr>
-                    <td className="py-2.5 px-4 font-medium text-slate-600">Water Availability</td>
+                    <td className="py-2.5 px-4 font-medium text-slate-600">
+                      Water Availability
+                      <span className="block text-[10px] text-slate-400 font-normal">Demo assumption – field verification required</span>
+                    </td>
                     {comparisonData.parcels.map((p) => (
                       <td key={p.land_id} className="py-2.5 px-4 text-slate-800">
-                        {p.water_availability === true
-                          ? '✅ Available'
-                          : p.water_availability === false
-                          ? '❌ Not Available'
-                          : 'ℹ️ Data Not Available'}
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-emerald-100 text-emerald-800">
+                          AVAILABLE
+                        </span>
                       </td>
                     ))}
                   </tr>
                   <tr>
-                    <td className="py-2.5 px-4 font-medium text-slate-600">Electricity Availability</td>
+                    <td className="py-2.5 px-4 font-medium text-slate-600">
+                      Electricity Availability
+                      <span className="block text-[10px] text-slate-400 font-normal">Demo assumption – field verification required</span>
+                    </td>
                     {comparisonData.parcels.map((p) => (
                       <td key={p.land_id} className="py-2.5 px-4 text-slate-800">
-                        {p.electricity_availability === true
-                          ? '✅ Available'
-                          : p.electricity_availability === false
-                          ? '❌ Not Available'
-                          : 'ℹ️ Data Not Available'}
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-emerald-100 text-emerald-800">
+                          AVAILABLE
+                        </span>
                       </td>
                     ))}
                   </tr>
